@@ -82,6 +82,7 @@
 #include "config.h"
 #include "input.h"
 #include "botinput.h"
+#include "simulant_probe.h"
 #include "optionsoverlay.h"
 /* D194 absolute aim: read-only access to the live camera (struct player).
  * Game header pulled in through the same shim path every other compiled game
@@ -650,6 +651,7 @@ void inputDestroy(void)
 void inputUpdate(void)
 {
     SDL_GameControllerUpdate();
+    simulantProbePoll();
 
     if (gamemode != GE_GAMEMODE_MULTI) {
         mpInitialized = 0;
@@ -1437,6 +1439,20 @@ PlayerInput inputForPlayer(int idx)
 
     state.buttons = inputComputeLocalPad(idx, &state.stick_x, &state.stick_y);
     return state;
+}
+
+int inputMpDebugBotPlayer(void)
+{
+    if (!mpTestPlayers || !inputMpActive()
+        || current_menu != GE_MENU_RUN_STAGE || mpDebugKeyboardSource < 0)
+        return -1;
+    int takenOver = -1;
+    for (int i = 0; i < getPlayerCount() && i < MAX_PADS; ++i) {
+        if (!mpBot[i] || mpSource[i] < openPads) continue;
+        if (mpSource[i] != mpDebugKeyboardSource) return i;
+        takenOver = i;
+    }
+    return takenOver;
 }
 
 unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)

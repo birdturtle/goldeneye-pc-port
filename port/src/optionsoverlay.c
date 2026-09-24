@@ -44,6 +44,7 @@
 #include "config.h"
 #include "video.h"
 #include "input.h"
+#include "botinput.h"
 #include "optionsoverlay.h"
 #include "../fast3d/gfx_api.h"
 
@@ -818,6 +819,55 @@ static Gfx *fillRect(Gfx *gdl, s32 x0, s32 y0, s32 x1, s32 y1,
     return gdl;
 }
 
+/* F8 development view: compact top-down X/Z map of the cached route.
+ * All geometry is confined to this overlay's own display list. */
+static Gfx *drawBotRoute(Gfx *gdl, int player, int width, int height)
+{
+    BotDebugRoute route;
+    if (!botInputDebugRoute(player, &route) || route.count <= 0) return gdl;
+    float minx = route.bot_x, maxx = minx, minz = route.bot_z, maxz = minz;
+    for (int i = 0; i < route.count; ++i) {
+        if (route.x[i] < minx) minx = route.x[i];
+        if (route.x[i] > maxx) maxx = route.x[i];
+        if (route.z[i] < minz) minz = route.z[i];
+        if (route.z[i] > maxz) maxz = route.z[i];
+    }
+    if (route.target_x < minx) minx = route.target_x;
+    if (route.target_x > maxx) maxx = route.target_x;
+    if (route.target_z < minz) minz = route.target_z;
+    if (route.target_z > maxz) maxz = route.target_z;
+    int x0 = 8, y0 = 20, w = width / 3, h = height / 3;
+    if (w > 115) w = 115;
+    if (h > 90) h = 90;
+    if (w < 40 || h < 35) return gdl;
+    float scale_x = (w - 12) / fmaxf(100.0f, maxx - minx);
+    float scale_z = (h - 12) / fmaxf(100.0f, maxz - minz);
+#define MAP_X(x) (x0 + 6 + (int)(((x) - minx) * scale_x))
+#define MAP_Y(z) (y0 + 6 + (int)(((z) - minz) * scale_z))
+    gdl = fillRect(gdl, x0, y0, x0 + w, y0 + h, 0, 0, 0, 150);
+    for (int i = 1; i < route.count; ++i) {
+        int ax = MAP_X(route.x[i - 1]), ay = MAP_Y(route.z[i - 1]);
+        int bx = MAP_X(route.x[i]), by = MAP_Y(route.z[i]);
+        for (int j = 0; j <= 8; ++j) {
+            int x = ax + (bx - ax) * j / 8;
+            int y = ay + (by - ay) * j / 8;
+            gdl = fillRect(gdl, x, y, x + 1, y + 1, 255, 220, 80, 230);
+        }
+    }
+    for (int i = 0; i < route.count; ++i) {
+        int x = MAP_X(route.x[i]), y = MAP_Y(route.z[i]);
+        gdl = fillRect(gdl, x - 1, y - 1, x + 2, y + 2,
+                       i == route.next ? 255 : 210, i == route.next ? 80 : 210, 40, 255);
+    }
+    int bx = MAP_X(route.bot_x), by = MAP_Y(route.bot_z);
+    int tx = MAP_X(route.target_x), ty = MAP_Y(route.target_z);
+    gdl = fillRect(gdl, bx - 2, by - 2, bx + 3, by + 3, 40, 220, 255, 255);
+    gdl = fillRect(gdl, tx - 2, ty - 2, tx + 3, ty + 3, 255, 60, 60, 255);
+#undef MAP_X
+#undef MAP_Y
+    return gdl;
+}
+
 static void valueText(const struct Row *r, char *out, int n)
 {
     double v = rowGet(r);
@@ -914,7 +964,8 @@ Gfx *optionsOverlayEmit(void)
 
     if (!s_open) {
         int deviceMenu = current_menu == GE_MENU_MP_CONTROL_STYLE;
-        if (!deviceMenu && (!s_showFps || !s_fpsText[0])) {
+        int botDebug = inputMpDebugBotPlayer();
+        if (!deviceMenu && botDebug < 0 && (!s_showFps || !s_fpsText[0])) {
             return NULL;   /* nothing appended -> golden dumps byte-identical */
         }
         /* D213: FPS-only mini DL (top-right), panel closed. */
@@ -949,6 +1000,8 @@ Gfx *optionsOverlayEmit(void)
                 }
             }
         }
+        if (botDebug >= 0)
+            fgdl = drawBotRoute(fgdl, botDebug, fw, fh);
         if (s_showFps && s_fpsText[0])
             fgdl = drawTextR(fgdl, fw - 6, 6, s_fpsText, 0x40ff60ff);
         gDPPipeSync(fgdl++);

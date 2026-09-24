@@ -75,6 +75,9 @@ void inputRescanPads(void);
 /* Device shown under each player's native multiplayer Control Style panel. */
 const char *inputMpDeviceLabel(int player);
 
+/* Bot route shown while F8's virtual-player debug mode is active. */
+int inputMpDebugBotPlayer(void);
+
 #ifdef __cplusplus
 }
 #endif
