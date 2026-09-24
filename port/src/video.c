@@ -23,6 +23,7 @@
 
 #include <PR/ultratypes.h>
 #include <PR/gbi.h>
+#include "player.h"
 
 #include "platform.h"
 #include "system.h"
@@ -509,6 +510,11 @@ void videoStartFrame(void)
                      "(vsync=%d fpscap=%d texfilter=%d fov=%d aniso=%d)",
                      cfgVSync, cfgFpsCap, cfgTexFilter, cfgFovScale, cfgAniso);
     }
+
+    /* The overscan crop remaps the current SP viewport to the entire window.
+     * Multiplayer renders several player viewports into one shared frame, so
+     * keep the original full-canvas mapping for those frames. */
+    gfx_set_safe_area_crop(cfgSafeAreaCrop && getPlayerCount() < 2);
 
     gfx_start_frame();
 }

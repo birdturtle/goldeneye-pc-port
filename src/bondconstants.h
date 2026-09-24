@@ -3464,6 +3464,11 @@ enum CCRMLUT
         PROP_CHRTESTTUBE,         /* Glass Test Tube                                                    */
         PROP_BOLLARD,             /* Bollard                                                            */
         PROP_MAX
+#ifdef PORT
+        /* GCC otherwise makes this all-nonnegative enum unsigned, so the
+         * -1 "no held model" result of getPropForHeldItem passes >= 0. */
+        , PROP__PORT_SIGNED = -1
+#endif
     } PROP;
 #ifdef AIPARSE
     char *PROP_ToString[] = {

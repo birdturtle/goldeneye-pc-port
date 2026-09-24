@@ -52,6 +52,8 @@ struct font;
 struct fontchar;
 extern struct font     *ptrFontBankGothic;
 extern struct fontchar *ptrFontBankGothicChars;
+extern struct font     *ptrFontZurichBold;
+extern struct fontchar *ptrFontZurichBoldChars;
 extern Gfx  *microcode_constructor(Gfx *gdl);
 extern Gfx  *textRender(Gfx *gdl, s32 *x, s32 *y, char *text, struct fontchar *chars,
                         struct font *font, u32 colour, s32 width, s32 height,
@@ -60,6 +62,9 @@ extern void  textMeasure(s32 *textheight, s32 *textwidth, char *text,
                          struct fontchar *chars, struct font *font, s32 lineheight);
 extern s16   viGetX(void);
 extern s16   viGetY(void);
+extern int   current_menu;
+extern s32   selected_num_players;
+#define GE_MENU_MP_CONTROL_STYLE 17
 
 /* ------------------------------------------------------------------------ */
 
@@ -877,6 +882,22 @@ static s32 measureText(const char *str)
     return w;
 }
 
+/* The original Control Style heading uses Zurich Bold; its smaller Bank
+ * Gothic font gives the device detail a clear secondary size. */
+static s32 measureMpText(const char *str)
+{
+    s32 h = 0, w = 0;
+    textMeasure(&h, &w, (char *)str, ptrFontBankGothicChars, ptrFontBankGothic, 0);
+    return w;
+}
+
+static Gfx *drawMpText(Gfx *gdl, s32 x, s32 y, const char *str)
+{
+    s32 px = x, py = y;
+    return textRender(gdl, &px, &py, (char *)str, ptrFontBankGothicChars,
+                      ptrFontBankGothic, 0x000000ff, viGetX(), viGetY(), 0, 0);
+}
+
 /* Right-aligned: the string ends at xr. */
 static Gfx *drawTextR(Gfx *gdl, s32 xr, s32 y, const char *str, u32 colour)
 {
@@ -892,7 +913,8 @@ Gfx *optionsOverlayEmit(void)
     fpsTick();
 
     if (!s_open) {
-        if (!s_showFps || !s_fpsText[0]) {
+        int deviceMenu = current_menu == GE_MENU_MP_CONTROL_STYLE;
+        if (!deviceMenu && (!s_showFps || !s_fpsText[0])) {
             return NULL;   /* nothing appended -> golden dumps byte-identical */
         }
         /* D213: FPS-only mini DL (top-right), panel closed. */
@@ -904,7 +926,31 @@ Gfx *optionsOverlayEmit(void)
         gDPSetTexturePersp(fgdl++, G_TP_NONE);
         gDPSetScissor(fgdl++, G_SC_NON_INTERLACE, 0, 0, fw, fh);
         fgdl = microcode_constructor(fgdl);
-        fgdl = drawTextR(fgdl, fw - 6, 6, s_fpsText, 0x40ff60ff);
+        if (deviceMenu) {
+            int players = selected_num_players;
+            if (players < 0) players = 0;
+            if (players > 4) players = 4;
+            for (int i = 0; i < players; ++i) {
+                int center = players == 2 ? 213 : (i & 1 ? 300 : 125);
+                int y = (players == 2 ? i : i / 2) * 140 + 133;
+                char label[64];
+                snprintf(label, sizeof(label), "DEVICE: %s", inputMpDeviceLabel(i));
+                fgdl = drawMpText(fgdl, center - measureMpText(label) / 2,
+                                  y, label);
+                int virtualSlot = strstr(label, "TEST PAD") || strstr(label, "BOT");
+                const char *hint = virtualSlot
+                    ? "F8: NEXT PLAYER" : "UP/DOWN: DEVICE";
+                fgdl = drawMpText(fgdl, center - measureMpText(hint) / 2,
+                                  y + 14, hint);
+                if (virtualSlot) {
+                    const char *toggle = "F9: BOT / TEST PAD";
+                    fgdl = drawMpText(fgdl, center - measureMpText(toggle) / 2,
+                                      y + 27, toggle);
+                }
+            }
+        }
+        if (s_showFps && s_fpsText[0])
+            fgdl = drawTextR(fgdl, fw - 6, 6, s_fpsText, 0x40ff60ff);
         gDPPipeSync(fgdl++);
         gSPEndDisplayList(fgdl++);
         return s_buf;

@@ -899,6 +899,10 @@ for (s = SP_LEVEL_EGYPT; s >= SP_LEVEL_DAM /* == 0 */; s--)   // never ends
 - Instances: **D142**; `LEVEL_SOLO_SEQUENCE` in
   `fileGetHighestStageDifficultyCompletedForFolder` froze the SELECT FILE
   screen. `DIFFICULTY` was already safe (`DIFFICULTY_MULTI = -1`).
+- Local multiplayer: `getPropForHeldItem(ITEM_FIST)` returns `-1` because
+  fists have no held world model. Unsigned `PROP` made the `prop >= 0` guard
+  pass in `sub_GAME_7F09B398`, reaching `modelLoad(-1)` on the first weapon
+  tick. A PC-only negative enum member after `PROP_MAX` restores the guard.
 - Fix: add a never-used negative sentinel enumerator under `#ifdef PORT`
   (`SP_LEVEL__PORT_SIGNED = -1`); forces the type signed, first real
   enumerator stays 0, `sizeof` stays 4, no stored value changes. Audit any

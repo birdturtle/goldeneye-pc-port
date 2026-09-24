@@ -128,7 +128,7 @@ to d69's output):
 ```sh
 python3 tools_pc/d43_emit.py ntsc-final          # -> data/pcmodels-ntsc-final/{pcmodels.bin,manifest.csv}  (~1.3 MB)
 python3 tools_pc/d69_emit.py ntsc-final          # -> data/pccg-ntsc-final/{pccg.bin,manifest.csv}          (bg + stan)
-python3 tools_pc/d88_emit.py ntsc-final --regen  #    appends the 21 per-level Usetup*Z stage-setup files -> ~3.6 MB
+python3 tools_pc/d88_emit.py ntsc-final --regen  #    appends solo and multiplayer stage-setup files
 ```
 
 **PAL / JP note:** sidecar generation for these regions is currently broken at
@@ -141,6 +141,49 @@ the repo (`scripts/filelist.u.csv`, `assets/obseg/file_resource_table.inc.c`,
 deterministic function of the ROM. Re-run after any change to `d43_emit.py` /
 `d69_emit.py` / `d88_emit.py` or the model/bg converters (`d43_*`, `d69_*`,
 `d88_propdefs.py`).
+
+For local multiplayer, regenerate the sidecar with `d88_emit.py --regen` even
+if you already generated it for solo play. Earlier versions omitted the
+`Ump_setup*Z` files; the Temple match needs `Ump_setuparchZ` in
+`data/pccg-ntsc-final/manifest.csv`. Rebuilding the executable alone does not
+regenerate ROM-derived sidecars.
+
+Local multiplayer devices are assigned in GoldenEye's **Control Style** menu.
+The PC port reports keyboard/mouse plus connected SDL gamepads as available
+player slots (up to four). The menu defaults Player 1 to keyboard/mouse and
+Players 2–4 to gamepads in detection order. On a player's panel, press Up or
+Down on that player's current device to cycle to another device. Choosing a
+device used by another player swaps their assignments, so one device cannot
+control two players. Each player can also select an original GoldenEye control
+style there; local multiplayer defaults to 1.2 (Solitaire) for analog look.
+Connect the devices before opening the multiplayer setup screen. No launch
+flag is needed, and solo play still merges keyboard/mouse with the first pad.
+
+To exercise three or four local players with fewer devices, launch with
+`GE_MP_TEST_PLAYERS=4 ./build-pc/ge007.x86_64.exe` in MSYS2 MINGW64. The
+missing controller slots appear as **TEST PAD** in the Control Style menu
+and send neutral input until selected. On the Character, Handicap, and Control
+Style screens, press **F8** to lend keyboard/mouse to the next TEST PAD player;
+confirm each player's selection normally (A, Z, or Start). A `*` marks the
+test player currently receiving keyboard/mouse on the Control Style screen.
+F8 also cycles through test players in a running match, then back to the
+keyboard player's slot. Only one
+player receives keyboard/mouse input at a time; connected gamepads continue
+to control their assigned players. TEST PAD assignments are fixed, while real
+keyboard and gamepad assignments can still be swapped in the menu. Set
+`GE_MP_TEST_PLAYERS=3` for a three-player test, or omit it to show only real
+devices. The original Players option
+in the multiplayer menu still chooses the actual match size.
+
+To try the first input-driven bot, use the same four-player test launch. On
+the **Control Style** screen, press **F8** until a TEST PAD has the `*`, then
+press **F9** to switch that slot to **BOT**. Confirm its 1.2 control style
+with Enter. Repeat for a second bot if desired, and confirm the other players
+as usual. In the match, F8 temporarily lends your keyboard/mouse to a bot
+slot, letting you take it over; cycle back to resume its bot input. This first
+bot pursues the nearest living opponent and fires when aligned on roughly the
+same height. It does not yet navigate around walls, seek items, or account for
+teams. Start with a free-for-all match to test it.
 
 > The release bundle ships the same converter frozen as
 > `prepare-assets/ge007-convert`; the game spawns it on first launch when the

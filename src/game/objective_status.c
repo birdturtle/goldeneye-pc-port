@@ -158,8 +158,18 @@ s32 get_difficulty_for_objective(s32 objectiveIndex)
 
 
 
-//horrible hack to get ai matching, but it does correctly refrence this func with 2 params
+// The original AI call passes an unused second argument. Some MinGW linkers
+// cannot resolve this cross-translation-unit weak alias, so provide the same
+// two-argument entry point explicitly in the PC build.
+#ifdef PORT
+s32 objectiveGetStatus_WEAK(s32 objectiveNum, s32 unused)
+{
+    (void)unused;
+    return get_status_of_objective(objectiveNum);
+}
+#else
 #pragma weak    objectiveGetStatus_WEAK = get_status_of_objective
+#endif
 
 /*
  * Return Status of objective.

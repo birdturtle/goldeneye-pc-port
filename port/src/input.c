@@ -19,7 +19,7 @@
  * GE's default "1.1" control style: analog stick = move/strafe, the four
  * C-buttons = aim/turn/look (DIGITAL on N64), R = aim mode, Z = fire.
  *
- * Keyboard + mouse (controller 0):
+ * Keyboard + mouse (controller 0 in solo; assigned player slot in multiplayer):
  *   W/S/A/D or arrows .. analog stick  (move / strafe)
  *   mouse motion ....... aim           (mode-aware -- see MOUSE-LOOK below)
  *   left mouse / LCtrl . Z trigger     (fire)
@@ -29,8 +29,9 @@
  *   Q ................. L trigger
  *   Enter / Tab ....... Start
  *
- * Xbox / SDL_GameController (controller 0 merges pad 0 with kbd/mouse;
- * pads 1-3 -> controllers 1-3):
+ * Xbox / SDL_GameController: solo merges pad 0 with keyboard/mouse on slot 0.
+ * Multiplayer exposes keyboard/mouse plus pads as independently assignable
+ * devices on the existing Control Style menu:
  *   left stick ........ analog stick   (move / strafe)
  *   right stick ....... C-buttons      (digital, 50% threshold -- aim)
  *   right trigger ..... Z trigger      (fire)
@@ -70,6 +71,7 @@
  */
 
 #include "port_math.h"   /* real system math decls; see header for why */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,11 +81,22 @@
 #include "system.h"
 #include "config.h"
 #include "input.h"
+#include "botinput.h"
 #include "optionsoverlay.h"
 /* D194 absolute aim: read-only access to the live camera (struct player).
  * Game header pulled in through the same shim path every other compiled game
  * file uses; we only READ vv_theta/vv_verta/speedtheta/speedverta/aspect. */
 #include "player.h"
+#include "language.h"
+/* Original multiplayer menu state. The menu owns each player's style. */
+extern s32 controlstyle_player[];
+extern s32 gamemode;
+extern s32 selected_num_players;
+#define GE_GAMEMODE_MULTI 1
+#define GE_MENU_MP_OPTIONS 14
+#define GE_MENU_MP_CHAR_SELECT 15
+#define GE_MENU_MP_CONTROL_STYLE 17
+#define GE_MENU_MP_TEAMS 20
 
 /* D194 spazz diagnosis: game ticks batched into the current poll (lv.h).
  * Read-only; declared locally to avoid pulling lv.h's wider dependency set. */
@@ -153,9 +166,6 @@ extern float cursor_h_pos, cursor_v_pos;
  * movement keeps working under it. No src/ edits; no behavior invented that
  * GE didn't already support. Escape hatch: Input.NaturalPitch=0 reverts to
  * the 1.1/HONEY default with the D166 digital-pitch-pulse hack. */
-extern int cur_player_get_control_type(void);
-extern void cur_player_set_control_type(int type);
-
 /* D194 absolute aim: live camera/projection accessors (src/fr.c, src/game/,
  * port/src/video.c). All are plain reads of state owned by the game thread,
  * sampled from inputComputePad which already runs in that same context
@@ -272,6 +282,20 @@ static void applyCursorVisibility(void);
 
 static int numControllers = 1;
 static int connectedMask   = 0x1;   /* controller 0 always present */
+static int openPads = 0;
+/* Optional development slots: advertise neutral controllers up to this
+ * player count. Physical pads still take precedence in detection order. */
+static int mpTestPlayers = 0;
+static int mpDebugKeyboardSource = -1;
+static int mpDebugSwitchPrev = 0;
+/* -1 = keyboard/mouse; 0..openPads-1 = physical pads; remaining sources
+ * are neutral development pads. Each source belongs to one multiplayer
+ * slot. Solo retains pad 0 + KB. */
+static int mpSource[MAX_PADS] = { -1, 0, 1, 2 };
+static int mpBot[MAX_PADS];           /* virtual player uses BotInput in game */
+static int mpInitialized = 0;
+static int mpDevicePrev[MAX_PADS + 1];
+static int mpBotTogglePrev = 0;
 
 static SDL_GameController *pads[MAX_PADS];
 static int padShoulderPrev[MAX_PADS];   /* LB/RB edge state for weapon cycling */
@@ -343,13 +367,13 @@ static int mouseDirectLook  = 1;    /* WI-1 (GEPD-INPUT-PLAN.md #89): 1 = hipfir
  * this poll's stick quantization. */
 /* D194 GEPD-mirror aim state: the crosshair position accumulator in game
  * units (±GEPD_CROSSHAIR_LIMIT at the screen edge). Written straight into
- * g_CurrentPlayer->crosshair_x/y_pos + gun_azimuth_angle/turning each tick;
+ * the keyboard player's crosshair_x/y_pos + gun_azimuth_angle/turning each tick;
  * bondview2's damped crosshair update keeps running and is simply
  * overwritten each tick (GEPD model, D194). */
 static double s_gepdCrossX = 0.0, s_gepdCrossY = 0.0;
 static int    s_gepdHeldPrev = 0;   /* aim held last tick -> adopt on entry */
-static int aimGepdCompute(double dxPx, double dyLook);
-static int hipDirectCompute(double dxPx, double dyLook);
+static int aimGepdCompute(struct player *p, double dxPx, double dyLook);
+static int hipDirectCompute(struct player *p, double dxPx, double dyLook);
 /* D194: bondview2's "look-ahead" pitch centreing (docentreupdown) arms during
  * hip-fire walking whenever the pitch strays from the horizon target, and --
  * once armed -- keeps pulling vv_verta back to it even in aim mode, EXCEPT
@@ -382,7 +406,7 @@ static int padLookInvertY = 0;                /* 1 = invert right-stick (look) Y
 /* Smoothed mouse delta carried between polls when mouseSmoothing > 0. */
 static double mouseSmDX = 0.0, mouseSmDY = 0.0;
 
-/* Raw relative-mouse delta accumulated since the last inputComputePad(0).
+/* Raw relative-mouse delta accumulated since the keyboard player's last poll.
  * NOT a persistent aim accumulator: mouse-look is a displacement device and
  * GE's aim is a rate device, so we consume the whole delta each poll and
  * reset -- stop moving and the stick/ C-button releases immediately. */
@@ -420,31 +444,23 @@ static void inputOpenPads(void)
 {
     connectedMask = 0x1;
     int n = SDL_NumJoysticks();
-    for (int i = 0; i < n && i < MAX_PADS; ++i) {
+    int slot = 0;
+    for (int i = 0; i < n && slot < MAX_PADS; ++i) {
         if (!SDL_IsGameController(i)) {
             continue;
         }
-        if (pads[i]) {
-            continue;
-        }
-        pads[i] = SDL_GameControllerOpen(i);
-        if (pads[i]) {
-            connectedMask |= (1 << i);
-            sysLogPrintf(LOG_NOTE, "input: opened gamepad %d '%s' as controller %d",
-                         i, SDL_GameControllerName(pads[i]), i);
+        pads[slot] = SDL_GameControllerOpen(i);
+        if (pads[slot]) {
+            if (slot + 1 < MAX_PADS) connectedMask |= (1 << (slot + 1));
+            sysLogPrintf(LOG_NOTE, "input: opened gamepad %d '%s' as pad %d",
+                         i, SDL_GameControllerName(pads[slot]), slot + 1);
+            ++slot;
         }
     }
-    for (int i = 0; i < MAX_PADS; ++i) {
-        if (pads[i]) {
-            connectedMask |= (1 << i);
-        }
-    }
-    numControllers = 1;
-    for (int i = 1; i < MAX_PADS; ++i) {
-        if (connectedMask & (1 << i)) {
-            numControllers = i + 1;
-        }
-    }
+    openPads = slot;
+    numControllers = slot + 1 < MAX_PADS ? slot + 1 : MAX_PADS;
+    if (mpTestPlayers > numControllers) numControllers = mpTestPlayers;
+    connectedMask = (1 << numControllers) - 1;
 }
 
 /* ------------------------------------------------------------------------
@@ -571,6 +587,13 @@ static void inputRebuildBinds(void);   /* D214; defined below with keyDown() */
 
 int inputInit(void)
 {
+    const char *testPlayers = getenv("GE_MP_TEST_PLAYERS");
+    if (testPlayers && testPlayers[0] >= '2' && testPlayers[0] <= '4'
+        && testPlayers[1] == '\0') {
+        mpTestPlayers = testPlayers[0] - '0';
+        sysLogPrintf(LOG_NOTE, "input: development multiplayer slots enabled (%d players)",
+                     mpTestPlayers);
+    }
     if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
         if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
             sysLogPrintf(LOG_WARNING, "input: SDL_INIT_GAMECONTROLLER failed: %s",
@@ -627,6 +650,77 @@ void inputDestroy(void)
 void inputUpdate(void)
 {
     SDL_GameControllerUpdate();
+
+    if (gamemode != GE_GAMEMODE_MULTI) {
+        mpInitialized = 0;
+        mpDebugKeyboardSource = -1;
+    } else if (!mpInitialized) {
+        /* The original menu still chooses player count and control styles. */
+        for (int i = 0; i < MAX_PADS; ++i) {
+            mpSource[i] = i - 1;
+            mpBot[i] = 0;
+            controlstyle_player[i] = CONTROLLER_CONFIG_SOLITARE_;
+        }
+        memset(mpDevicePrev, 0, sizeof(mpDevicePrev));
+        mpDebugKeyboardSource = -1;
+        mpInitialized = 1;
+    }
+
+    /* F8 lends keyboard/mouse to a virtual player. GoldenEye's character,
+     * handicap, and control-style screens each require a separate confirmation
+     * from every player; test pads need a way to send those inputs too. */
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    int switchNow = keys[SDL_SCANCODE_F8] != 0;
+    int debugStage = current_menu == GE_MENU_RUN_STAGE && getPlayerCount() >= 2;
+    int debugSetup = current_menu >= GE_MENU_MP_CHAR_SELECT
+        && current_menu <= GE_MENU_MP_CONTROL_STYLE;
+    if (mpTestPlayers && gamemode == GE_GAMEMODE_MULTI
+        && (debugStage || debugSetup)) {
+        int players = debugStage ? getPlayerCount() : selected_num_players;
+        if (players > MAX_PADS) players = MAX_PADS;
+        if (switchNow && !mpDebugSwitchPrev) {
+            int next = -1;
+            for (int source = mpDebugKeyboardSource + 1;
+                 source < numControllers - 1; ++source) {
+                if (source < openPads) continue;
+                for (int i = 0; i < players; ++i) {
+                    if (mpSource[i] == source) {
+                        next = source;
+                        break;
+                    }
+                }
+                if (next >= 0) break;
+            }
+            mpDebugKeyboardSource = next;
+            for (int i = 0; i < players; ++i) {
+                if (mpSource[i] == next) {
+                    sysLogPrintf(LOG_NOTE, "input: F8 keyboard/mouse now controls P%d", i + 1);
+                    break;
+                }
+            }
+        }
+    } else {
+        mpDebugKeyboardSource = -1;
+    }
+    mpDebugSwitchPrev = switchNow;
+
+    /* F9 turns the currently selected virtual slot into a bot (or back into
+     * a neutral test pad). Keep this on the native Control Style screen. */
+    int botToggleNow = keys[SDL_SCANCODE_F9] != 0;
+    if (mpTestPlayers && gamemode == GE_GAMEMODE_MULTI
+        && current_menu == GE_MENU_MP_CONTROL_STYLE
+        && botToggleNow && !mpBotTogglePrev
+        && mpDebugKeyboardSource >= openPads) {
+        for (int i = 0; i < selected_num_players && i < MAX_PADS; ++i) {
+            if (mpSource[i] == mpDebugKeyboardSource) {
+                mpBot[i] = !mpBot[i];
+                sysLogPrintf(LOG_NOTE, "input: MP P%d %s", i + 1,
+                             mpBot[i] ? "bot enabled" : "test pad enabled");
+                break;
+            }
+        }
+    }
+    mpBotTogglePrev = botToggleNow;
 
     if (!mouseEnabled || !mouseGrabbed) {
         return;
@@ -733,26 +827,112 @@ static int actHeld(const Uint8 *ks, int act)
     return 0;
 }
 
-/* Fill button mask + stick for controller idx. Returns the 16-bit mask. */
-unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
+static int inputMpActive(void)
+{
+    return gamemode == GE_GAMEMODE_MULTI && mpInitialized
+        && (current_menu == GE_MENU_RUN_STAGE
+            || (current_menu >= GE_MENU_MP_OPTIONS
+                && current_menu <= GE_MENU_MP_TEAMS));
+}
+
+/* Test pads remain on spare slots; only real input devices can be swapped.
+ * This keeps keyboard/menu control on an active player in smaller matches. */
+static void inputMpCycle(int player, int direction)
+{
+    int total = openPads + 1;
+    if (total < 2) return;
+    int old = mpSource[player];
+    int next = (old + 1 + direction + total) % total - 1;
+    if (next == old) return;
+    for (int i = 0; i < MAX_PADS; ++i) {
+        if (i != player && mpSource[i] == next) {
+            mpSource[i] = old;
+            break;
+        }
+    }
+    mpSource[player] = next;
+    if (next < 0)
+        sysLogPrintf(LOG_NOTE, "input: MP P%d assigned keyboard/mouse", player + 1);
+    else
+        sysLogPrintf(LOG_NOTE, "input: MP P%d assigned gamepad %d", player + 1, next + 1);
+}
+
+const char *inputMpDeviceLabel(int player)
+{
+    static char labels[MAX_PADS][32];
+    if (player < 0 || player >= MAX_PADS) return "";
+    int source = mpSource[player];
+    if (source < 0) return "KBD/MOUSE";
+    if (source >= openPads && source < numControllers - 1) {
+        if (mpBot[player])
+            return source == mpDebugKeyboardSource ? "BOT *" : "BOT";
+        return source == mpDebugKeyboardSource ? "TEST PAD *" : "TEST PAD";
+    }
+    if (source >= openPads) return "DISCONNECTED";
+    snprintf(labels[player], sizeof(labels[player]), "GAMEPAD %d", source + 1);
+    return labels[player];
+}
+
+static void inputMpMenuDeviceButtons(int player, int source)
+{
+    if (current_menu != GE_MENU_MP_CONTROL_STYLE || !inputMpActive()
+        || player >= selected_num_players) return;
+    int state = 0;
+    if (source < 0) {
+        const Uint8 *keys = SDL_GetKeyboardState(NULL);
+        if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) state |= 1;
+        if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) state |= 2;
+    } else if (source < openPads && pads[source]) {
+        if (SDL_GameControllerGetButton(pads[source], SDL_CONTROLLER_BUTTON_DPAD_UP)) state |= 1;
+        if (SDL_GameControllerGetButton(pads[source], SDL_CONTROLLER_BUTTON_DPAD_DOWN)) state |= 2;
+    }
+    int *prev = &mpDevicePrev[source + 1];
+    if ((state & 1) && !(*prev & 1)) inputMpCycle(player, -1);
+    else if ((state & 2) && !(*prev & 2)) inputMpCycle(player, 1);
+    *prev = state;
+}
+
+static int inputUsesNaturalPitch(int player)
+{
+    if (!inputMpActive()) return player == 0 && naturalPitchMode;
+    int style = controlstyle_player[player];
+    if (current_menu == GE_MENU_RUN_STAGE && getPlayerCount() >= 2
+        && g_playerPointers[player])
+        style = g_playerPointers[player]->cur_player_control_type_0;
+    return style == CONTROLLER_CONFIG_SOLITARE_ || style == 3;
+}
+
+/* Existing local keyboard/pad mapping, unchanged by the per-player seam. */
+static unsigned inputComputeLocalPad(int idx, signed char *stick_x, signed char *stick_y)
 {
     unsigned button = 0;
     int sx = 0, sy = 0;
-
-    /* D194/D238: self-correcting every poll -- cheap (plain field writes,
-     * see options.c cur_player_set_control_type), and re-asserts itself if
-     * anything else ever calls the setter (menu, save load) in between. */
-    if (idx == 0 && g_CurrentPlayer != NULL) {
-        int wantSolitare = naturalPitchMode ? CONTROLLER_CONFIG_SOLITARE_ : CONTROLLER_CONFIG_HONEY_;
-        if (cur_player_get_control_type() != wantSolitare) {
-            cur_player_set_control_type(wantSolitare);
-        }
-    }
-
     if (idx < 0 || idx >= MAX_PADS) {
         if (stick_x) *stick_x = 0;
         if (stick_y) *stick_y = 0;
         return 0;
+    }
+    int source = inputMpActive() ? mpSource[idx] : idx - 1;
+    int keyboardSlot = inputMpActive()
+        ? source == (mpTestPlayers ? mpDebugKeyboardSource : -1)
+        : idx == 0;
+    int naturalLook = inputUsesNaturalPitch(idx);
+    /* Mouse look belongs to the slot assigned keyboard/mouse, regardless of
+     * which other player the game is currently ticking or rendering. */
+    struct player *mousePlayer = keyboardSlot ? g_playerPointers[idx] : NULL;
+
+    /* Solo keeps its existing keyboard/mouse control remap. Multiplayer
+     * takes each player's selected style from GoldenEye's original menu. */
+    if (keyboardSlot && !inputMpActive() && mousePlayer != NULL) {
+        struct player *player1 = mousePlayer;
+        int wantSolitare = naturalPitchMode ? CONTROLLER_CONFIG_SOLITARE_ : CONTROLLER_CONFIG_HONEY_;
+        if (player1->cur_player_control_type_0 != wantSolitare) {
+            player1->cur_player_control_type_0 = wantSolitare;
+            player1->cur_player_control_type_1 = wantSolitare;
+            player1->cur_player_control_type_2 = (float)wantSolitare;
+            player1->neg_vspacing_for_control_type_entry = -(j_text_trigger ? 14 : 10) * wantSolitare;
+            player1->has_set_control_type_data = TRUE;
+        }
     }
 
     /* F10 options overlay: while it is open, controller 0 is fully swallowed
@@ -763,7 +943,8 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
         /* Select closes the overlay. padSelectPrev is tracked on this path
          * and the open path below alike, so a button held across the
          * transition cannot immediately re-toggle it. */
-        int selNow = pads[0] ? SDL_GameControllerGetButton(pads[0],
+        SDL_GameController *menuPad = source >= 0 && source < openPads ? pads[source] : NULL;
+        int selNow = menuPad ? SDL_GameControllerGetButton(menuPad,
                                                            SDL_CONTROLLER_BUTTON_BACK) : 0;
         if (selNow && !padSelectPrev) optionsOverlayToggle();
         padSelectPrev = selNow;
@@ -773,8 +954,8 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
         return 0;
     }
 
-    /* ---- keyboard + mouse: controller 0 only ---- */
-    if (idx == 0) {
+    /* ---- keyboard + mouse: exactly one assigned slot ---- */
+    if (keyboardSlot && !optionsOverlayIsOpen()) {
         const Uint8 *ks = SDL_GetKeyboardState(NULL);
         Uint32 mb = mouseEnabled ? SDL_GetMouseState(NULL, NULL) : 0;
         int menuMode = (current_menu != GE_MENU_RUN_STAGE &&
@@ -816,7 +997,7 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
          * because the stick's Y axis is what carries continuous analog
          * pitch there instead. Strafe and turn are unchanged -- both
          * schemes read them the same way. */
-        if (naturalPitchMode) {
+        if (naturalLook) {
             if (actHeld(ks, IA_FORWARD)) button |= GE_CONT_E;   /* C-up = forward   */
             if (actHeld(ks, IA_BACK))    button |= GE_CONT_D;   /* C-down = back    */
         } else {
@@ -833,20 +1014,20 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
         int aimHeld = (mb & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0 ||
                       actHeld(ks, IA_AIM);
         int aimRisingEdgeAim = aimHeld && !s_aimHeldPrev;
-        if (aimRisingEdgeAim && g_CurrentPlayer && g_CurrentPlayer->docentreupdown)
+        if (aimRisingEdgeAim && mousePlayer && mousePlayer->docentreupdown)
             s_centreClearTicks = 2;   /* see D194 centre-spring note above */
         if (!aimHeld) {
             s_centreClearTicks = 0;
             /* GEPD adopts the game's current crosshair pos every non-aim
              * frame so re-entry starts where the game left it. */
             s_gepdHeldPrev = 0;
-            if (g_CurrentPlayer) {
-                s_gepdCrossX = (double) g_CurrentPlayer->crosshair_x_pos;
-                s_gepdCrossY = (double) g_CurrentPlayer->crosshair_y_pos;
+            if (mousePlayer) {
+                s_gepdCrossX = (double) mousePlayer->crosshair_x_pos;
+                s_gepdCrossY = (double) mousePlayer->crosshair_y_pos;
             }
         }
         s_aimHeldPrev = aimHeld;
-        if (aimRisingEdgeAim && g_CurrentPlayer && g_CurrentPlayer->docentreupdown
+        if (aimRisingEdgeAim && mousePlayer && mousePlayer->docentreupdown
             && configGetInputLog()) {
             sysLogPrintf(LOG_NOTE,
                 "GE_INPUTLOG absaim centre-spring armed at aim entry; nudging to clear");
@@ -1017,7 +1198,7 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
                  * look stick (see aimGepdCompute). Keyboard turn (sx/sy set
                  * above) still works. Otherwise fall through to the legacy
                  * velocity stick below. */
-                if (!aimGepdCompute(edx * lookDtScale, dyLook * lookDtScale)) {
+                if (!aimGepdCompute(mousePlayer, edx * lookDtScale, dyLook * lookDtScale)) {
                 double aimEdx = edx * lookDtScale, aimDyLook = dyLook * lookDtScale;
                 double aimSens = (mouseAimSpeed / 100.0) * (mouseSensitivity / 100.0);
                 double gamma = aimCurveGamma / 100.0;
@@ -1043,9 +1224,9 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
                  * of ticks -- enough for bondview2's manual-input rule to clear
                  * docentreupdown, small enough (~0.1-0.3 deg) not to read as a
                  * jerk. Only when we are not already pitching this poll. */
-                if (s_centreClearTicks > 0 && g_CurrentPlayer &&
+                if (s_centreClearTicks > 0 && mousePlayer &&
                     sy >= -60 && sy <= 60) {
-                    sy = (g_CurrentPlayer->speedverta >= 0.0f) ? -61 : 61;
+                    sy = (mousePlayer->speedverta >= 0.0f) ? -61 : 61;
                     s_centreClearTicks--;
                 }
             } else {
@@ -1058,14 +1239,14 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
                  * unrecognised" and fast motion bang-bang). Falls through to
                  * the legacy stick path below when it declines (disabled, no
                  * player, or a safety gate is closed). */
-                if (mouseDirectLook && hipDirectCompute(hipEdx, hipDyLook)) {
+                if (mouseDirectLook && hipDirectCompute(mousePlayer, hipEdx, hipDyLook)) {
                     /* Pitch handled inside hipDirectCompute too; nothing left
                      * to do for yaw/pitch this poll. Digital pitch-pulse
                      * (naturalPitchMode==0) still applies below only in the
                      * legacy path, so skip both branches here. */
                 } else {
                 sx += (int)(hipEdx * hipSens * MOUSE_TURN_GAIN);
-                if (naturalPitchMode) {
+                if (naturalLook) {
                     /* D194/D238: SOLITARE gives hipfire pitch the same
                      * continuous analog stick treatment as yaw -- same
                      * formula as the sx line above, so X and Y are, by
@@ -1108,7 +1289,8 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
     }
 
     /* ---- gamepad ---- */
-    SDL_GameController *pad = pads[idx];
+    int padIndex = inputMpActive() ? source : idx;
+    SDL_GameController *pad = padIndex >= 0 && padIndex < openPads ? pads[padIndex] : NULL;
     if (pad) {
         int lx = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
         int ly = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
@@ -1133,7 +1315,7 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
             int py = -scaleAxis(ly);       /* SDL up = negative -> N64 up = positive */
             if (px) sx = px;
             if (py) sy = py;
-        } else if (naturalPitchMode) {
+        } else if (naturalLook) {
             /* D194/D238: SOLITARE swaps stick roles -- left stick becomes
              * digital-step movement (same analog-for-movement tradeoff as
              * the keyboard remap above), right stick becomes continuous
@@ -1184,7 +1366,7 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
         {
             int lbNow = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
             int rbNow = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
-            int *prev = &padShoulderPrev[idx];
+            int *prev = &padShoulderPrev[padIndex];
             /* Track edge state in menus too: a shoulder held across the
              * menu->game transition must not fire a cycle on entry. */
             if (!padMenuMode) {
@@ -1207,7 +1389,7 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
         /* Select (BACK) opens the F10 options overlay -- the gamepad
          * equivalent of the F10 key for controller-only machines (Steam
          * Deck). The game never reads BACK, so nothing is withheld. */
-        {
+        if (idx == 0) {
             int selNow = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK);
             if (selNow && !padSelectPrev) optionsOverlayToggle();
             padSelectPrev = selNow;
@@ -1235,7 +1417,34 @@ unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
                      idx, button, sx, sy);
     }
 
+    if (inputMpActive()) inputMpMenuDeviceButtons(idx, source);
+
     return button;
+}
+
+/* GoldenEye sees the same commands for every source. In particular, a bot
+ * occupies an ordinary player slot and enters through osContGetReadData just
+ * like a physical pad. F8 can temporarily take over a bot for debugging. */
+PlayerInput inputForPlayer(int idx)
+{
+    PlayerInput state = {0};
+    if (idx < 0 || idx >= MAX_PADS) return state;
+    if (inputMpActive() && current_menu == GE_MENU_RUN_STAGE
+        && idx < getPlayerCount() && mpBot[idx]
+        && mpSource[idx] >= openPads
+        && mpSource[idx] != mpDebugKeyboardSource)
+        return botInputForPlayer(idx);
+
+    state.buttons = inputComputeLocalPad(idx, &state.stick_x, &state.stick_y);
+    return state;
+}
+
+unsigned inputComputePad(int idx, signed char *stick_x, signed char *stick_y)
+{
+    PlayerInput state = inputForPlayer(idx);
+    if (stick_x) *stick_x = state.stick_x;
+    if (stick_y) *stick_y = state.stick_y;
+    return state.buttons;
 }
 
 static void applyGrab(int want)
@@ -1314,14 +1523,18 @@ int inputReleaseCapture(void)
  * closes and the early-return no longer fires. */
 int inputPadButton(int idx, SDL_GameControllerButton b)
 {
-    if (idx < 0 || idx >= MAX_PADS || !pads[idx]) return 0;
-    return SDL_GameControllerGetButton(pads[idx], b);
+    if (idx < 0 || idx >= MAX_PADS) return 0;
+    int source = inputMpActive() ? mpSource[idx] : idx;
+    if (source < 0 || source >= openPads || !pads[source]) return 0;
+    return SDL_GameControllerGetButton(pads[source], b);
 }
 
 short inputPadAxis(int idx, SDL_GameControllerAxis a)
 {
-    if (idx < 0 || idx >= MAX_PADS || !pads[idx]) return 0;
-    return SDL_GameControllerGetAxis(pads[idx], a);
+    if (idx < 0 || idx >= MAX_PADS) return 0;
+    int source = inputMpActive() ? mpSource[idx] : idx;
+    if (source < 0 || source >= openPads || !pads[source]) return 0;
+    return SDL_GameControllerGetAxis(pads[source], a);
 }
 
 void inputSuspendForOverlay(void)
@@ -1347,9 +1560,8 @@ void inputPostWheel(int notches)
 
 /* Called from the host event pump on SDL_CONTROLLERDEVICEADDED/REMOVED.
  * Closes every open pad and re-opens whatever is present now. `connectedMask`
- * bit 0 (keyboard/mouse) is always kept. Note: the game latches the mask at
- * osContInit (boot), so a pad added later still merges into controller 0 for
- * play -- it just won't appear as a separate controller channel. */
+ * bit 0 (keyboard/mouse) is always kept; joyCheckStatus periodically queries
+ * the current mask, including gamepads added after boot. */
 void inputRescanPads(void)
 {
     for (int i = 0; i < MAX_PADS; ++i) {
@@ -1359,6 +1571,13 @@ void inputRescanPads(void)
         }
     }
     inputOpenPads();
+    /* Physical indices can shift after a hotplug. Return to a safe, unique
+     * mapping rather than leaving a player assigned to a vanished pad. */
+    for (int i = 0; i < MAX_PADS; ++i) {
+        mpSource[i] = i - 1;
+        mpBot[i] = 0;
+    }
+    memset(mpDevicePrev, 0, sizeof(mpDevicePrev));
     sysLogPrintf(LOG_NOTE, "input: rescanned pads (mask=0x%x, %d controller(s))",
                  connectedMask, numControllers);
 }
@@ -1413,9 +1632,8 @@ int inputGetNumControllers(void)
  * Returns 1 if it handled this poll (callers must NOT emit a look stick);
  * 0 means fall back to the legacy velocity stick.
  */
-static int aimGepdCompute(double dxPx, double dyLook)
+static int aimGepdCompute(struct player *p, double dxPx, double dyLook)
 {
-    struct player *p = g_CurrentPlayer;
 
     /* Needs the grabbed-cursor relative deltas (capture mode, locked in a
      * stage) and a live player. dxPx/dyLook are this poll's dt-scaled px. */
@@ -1528,9 +1746,8 @@ static int aimGepdCompute(double dxPx, double dyLook)
  * stick path); 0 to fall back (disabled, no player, or a safety gate is
  * closed -- e.g. mid-death or mid-cutscene, matching GEPD's !dead/!watch).
  */
-static int hipDirectCompute(double dxPx, double dyLook)
+static int hipDirectCompute(struct player *p, double dxPx, double dyLook)
 {
-    struct player *p = g_CurrentPlayer;
 
     if (!mouseDirectLook || !mouseGrabbed || p == NULL)
         return 0;

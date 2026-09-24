@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""D88: offline emit pass -- convert per-level "Usetup*Z" stage-setup files
+"""D88: offline emit pass -- convert solo and multiplayer stage-setup files
 to PC layout, appending them to the same pccg.bin/manifest.csv sidecar image
 produced by d69_emit.py (port/src/pccg.c already serves any filename listed
 in the manifest, so this script just needs to add rows).
@@ -494,8 +494,11 @@ for line in open(TABLE):
     if m:
         table_names.append(m.group(1))
 
-usetup_names = sorted(set(n for n in table_names
-                           if n.startswith("Usetup") and n.endswith("Z")))
+def is_usetup_row(name):
+    return name.endswith("Z") and (name.startswith("Usetup") or
+                                    name.startswith("Ump_setup"))
+
+usetup_names = sorted(set(n for n in table_names if is_usetup_row(n)))
 
 manifest = []
 chunks = []
@@ -504,9 +507,6 @@ existing_names = set()
 os.makedirs(OUT_DIR, exist_ok=True)
 bin_path = os.path.join(OUT_DIR, "pccg.bin")
 man_path = os.path.join(OUT_DIR, "manifest.csv")
-def is_usetup_row(nm):
-    return nm.startswith("Usetup") and nm.endswith("Z")
-
 def emit(name, data):
     global cur_off
     start = (cur_off + 15) & ~15
@@ -528,7 +528,7 @@ if os.path.exists(bin_path) and os.path.exists(man_path):
     with open(bin_path, "rb") as f:
         base = f.read()
     if REGEN:
-        # Drop every Usetup*Z row (manifest entry + its bytes) and rebuild the
+        # Drop every setup row (manifest entry + its bytes) and rebuild the
         # sidecar from the surviving d69 rows only, so converter iteration
         # starts from a clean slate every run. Don't hand-edit manifest.csv.
         dropped = [nm for (nm, _o, _s) in old_rows if is_usetup_row(nm)]
@@ -538,7 +538,7 @@ if os.path.exists(bin_path) and os.path.exists(man_path):
             emit(nm, base[o:o + s])
             existing_names.add(nm)
         print(f"--regen: kept {len(manifest)} d69 rows, dropped "
-              f"{len(dropped)} Usetup*Z rows; sidecar rebuilt to {cur_off} bytes")
+              f"{len(dropped)} setup rows; sidecar rebuilt to {cur_off} bytes")
     else:
         manifest.extend(old_rows)
         for (nm, _o, _s) in old_rows:
@@ -573,7 +573,7 @@ for name in usetup_names:
         emit(name, comp_out)
         n_ok += 1
 
-print(f"converted: {n_ok}/{len(usetup_names)} Usetup*Z files")
+print(f"converted: {n_ok}/{len(usetup_names)} solo/MP setup files")
 
 if errors:
     print(f"\n{len(errors)} ERRORS:")

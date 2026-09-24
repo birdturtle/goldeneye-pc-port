@@ -12,6 +12,7 @@
  */
 
 #include <PR/ultratypes.h>
+#include "playerinput.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,11 +29,14 @@ void inputUpdate(void);
 /* Number of controllers currently "connected" (1..4). */
 int  inputGetNumControllers(void);
 
-/* Bitmask of connected controllers (bit N = controller N). Bit 0 is always
- * set (keyboard/mouse). Consumed by libultra.c's osContInit. */
+/* Bitmask of available player slots (bit N = slot N). Keyboard/mouse keeps
+ * slot 0 present; additional slots appear for connected gamepads. */
 int  inputConnectedMask(void);
 
-/* Compute the N64 button mask + analog stick for controller `idx`.
+/* Per-player dispatch: keyboard/mouse, SDL pad, neutral test pad, or bot. */
+PlayerInput inputForPlayer(int idx);
+
+/* Compatibility wrapper for the N64 controller snapshot in libultra.c.
  * Returns the 16-bit CONT_* button mask; writes the stick (-80..80) through
  * the out params. Reads current SDL keyboard/mouse/gamepad state plus the
  * mouse-aim accumulator maintained by inputUpdate(). */
@@ -67,6 +71,9 @@ void inputPostWheel(int notches);
 
 /* Re-enumerate gamepads after a hotplug (SDL_CONTROLLERDEVICEADDED/REMOVED). */
 void inputRescanPads(void);
+
+/* Device shown under each player's native multiplayer Control Style panel. */
+const char *inputMpDeviceLabel(int player);
 
 #ifdef __cplusplus
 }
