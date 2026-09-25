@@ -1865,6 +1865,9 @@ typedef enum MENU
     MENU_SWITCH_SCREENS,
     MENU_DISPLAY_CAST,
     MENU_SPECTRUM_EMU,
+#ifdef PORT
+    MENU_MP_SIMULANTS,
+#endif
     MENU_MAX
 } MENU;
 
@@ -4905,4 +4908,3 @@ typedef enum PROJECTILES
 #pragma endregion
 
 #endif
-

@@ -610,6 +610,7 @@ covers D24–D69; the log continues in §H (D32 procedure, D70–D121).
 | D322 | **Long-session audio degradation: full campaign on v0.3.0 — audio progressively worsens from Silo, by Caverns/Cradle the OST is inaudible and SFX "come and go"; restarting the game restores it (issue #87, user report, 2026-09-21).** — full `## D322` entry at file tail | OPEN — static triage done (teardown audit, mixer statelessness, D202-coverage check); ranked hypotheses: voice-pool exhaustion/counter drift > queue starvation > evtq saturation. `GE_D322` pool-telemetry probe shipped; needs a campaign capture with `GE_D322=1 GE_D204=1`. |
 | D323 | **MP respawn/quit corrupts model node pointers via under-allocated player inventory (`InvItem` 0x14 N64 vs 0x20 PC).** — full `## D323` entry at file tail | PARTIAL — root cause proven by hardware watchpoint; `sizeof(*p_itemcur)` allocation applied under `PORT`; Windows rebuild and repeated-match verification pending. |
 | D324 | **Vertex-store parent arrays allocate 0x14-byte N64 slots but use 0x18-byte PC structs, overwriting adjacent Vertex buffers during initialization.** — full `## D324` entry at file tail | PARTIAL — source/layout proof and PC-only typed allocation applied; Windows runtime validation pending. No causal claim for the latest GDB watchpoint stop. |
+| D325 | **One-human multiplayer and first Facility Simulant route.** — full `## D325` entry at file tail | PARTIAL — native setup, stage routing, score and radar compile; Windows runtime playtest pending. |
 
 Phase 2 replaced the Phase-1 demo loop with the real `mainproc()` on real OS
 threads, compiled GE's real `src/sched.c`, and brought in PD's fast3d software
@@ -12267,3 +12268,97 @@ Full campaign (or at minimum Silo → Caverns/Cradle) with **`GE_D322=1 GE_D204=
 **Verification owed:** Windows rebuild; one/multiple-player stage load with vertex-store parent and Vertex boundary checks, followed by Facility→title→You Only Live Twice, same/switch-map 10+ cycles. Watch full first-write logs for any remaining invalid writes. Document any newly observed writer independently.
 
 **Status:** PARTIAL — source/layout violation proven, PC-size repair prepared, runtime validation pending.
+
+## D325 — First one-human Simulant match route (2026-09-25)
+
+**Root boundary:** Original GoldenEye equates multiplayer with at least two
+human `struct player` instances. Mode selection requires two controllers;
+stage allocation, object setup, health/rules, radar, death/respawn and watch
+display test `getPlayerCount() >= 2`. A separate AI character cannot raise
+that count without incorrectly creating a viewport and controller.
+
+**Feature change:** The user explicitly requested a four-total-combatant PC
+Simulant mode with humans taking first priority. PC-only branches route
+multiplayer decisions through `gamemode` while leaving human viewport and
+controller iteration tied to `getPlayerCount()`. A native Players dossier
+page exposes the first one-human/one-Simulant Facility slice. The stage roster
+reserves the second identity; the actor binds on spawn and credits both kill
+directions in the shared `g_playerPlayerData` matrix. Radar, watch score and
+point-limit paths read roster count; the bot never becomes a `struct player`.
+`src/game` additions are guarded by `PORT` because this is an authorized new
+PC feature, not an N64 fidelity repair or a claim of an ABI-only exception.
+
+**Evidence and limits:** Host syntax compilation of all touched C sources and
+the roster unit check pass. There is no Windows/ROM runtime in this workspace.
+Only Normal, one human plus one bot, and Facility navigation are enabled; a
+bot death is credited to the only human in that two-combatant slice. See
+`docs/dev/SIMULANT-IMPLEMENTATION.md` for the exact playtest and remaining
+gates. Full gameplay and transition verification is pending.
+
+**Status:** PARTIAL — source integration compiled; Windows playtest pending.
+
+**Windows playtest follow-up:** The first one-human Facility match opened
+without a crash and showed the bot on radar, but entered first-person
+immediately and had no MP entrance, watch, gauges or visible kill tally.
+`bondviewLoadSetupIntroSection` still chose `CAMERAMODE_INTRO` solely from
+the human count; `mpwatchMenuTick` returned early at one human. The bottom
+message queue and kill/death notifications had the same human-count guard.
+PC match branches now choose the MP swirl, player model and starting gun,
+watch tick, message queue and kill/death notices. The native character death
+action updates the human kill counter; the probe writes the score matrix;
+bot-to-human kills update the bot's counter. Human viewport loops still
+iterate human players only. Host syntax checks pass for US, EU and JP.
+
+**Second Windows playtest and correction:** The MP camera and watch now work,
+but each bot kill displayed two kills and the visible tally reached 12.
+`chraction.c` already calls
+`increment_num_kills_display_text_in_MP()` while transitioning a killed
+character to `ACT_DIE`; the probe's death observation called it again.
+`get_points_for_mp_player()` reads the probe's single `kill_counts[botSlot]`
+matrix increment, so the displayed kill tally was ahead of actual points.
+Remove the probe's redundant native counter call while retaining its one
+matrix write. One bot death should now add one to both displayed kills and
+the match score. The corrected Windows match and endgame remain to be
+playtested.
+
+**Third Windows playtest and spawn correction:** The kill tally is now one
+per bot death. The reported failure to end at ten kills was an incorrect
+expectation caused by our test instructions: `front.c` initializes
+`game_length = LEN_10MIN`, and that preset's `points` field is zero. Ten
+kills only ends a match after selecting `10 POINTS` in the Game Length row.
+The point-limit branch reads the shared score matrix for both combatants;
+its runtime end screen under a selected points preset remains unverified.
+Separately, the bot respawn code chose the pad with the largest distance
+from the living player, repeatedly picking the same opposite-side pads.
+It now selects uniformly among multiplayer pads at least 100 horizontal
+units from every living human, consistent with GoldenEye's close-range
+spawn fallback. Windows spawn distribution still needs playtesting.
+
+**Combat boundary (next slice):** The probe applied its own player damage
+routine, assumed the only human caused every bot death, and set the bot's
+`ChrRecord.maxdamage` to 1.0. Normal multiplayer players have one
+normalized health unit, but actor weapon hits are measured in eighths of
+that scale (`handles_shot_actors` uses raw damage while
+`record_damage_kills` receives raw damage multiplied by 0.125). The bot
+therefore had one-eighth the equivalent health. `port/src/mp_combat.c` now
+owns per-incarnation human attacker references, one-time matrix credit and
+the bot-to-human health/armor/death path. The bot starts at 8 actor damage
+units and the one-human campaign AI health multiplier no longer applies to
+Simulants. Bot shots apply the human victim's MP Health handicap. The native
+character death action emits the kill tally once for a known human attacker;
+the combat adapter writes the participant matrix once. Environmental damage
+clears attacker ownership. Regional host syntax and the isolated life/
+attribution check pass. Bot armor pickup and explosion ownership are still
+open; Windows gameplay verification is owed.
+
+**Hit reaction follow-up:** In the Windows combat playtest the only reported
+issue was campaign-style guard recoil on the bot. `handles_shot_actors`
+applies damage and then enters `ACT_ARGH` or `ACT_PREARGH` for a nonfatal
+character hit; `triggered_on_shot_hit` explicitly excludes multiplayer
+player props from that guard animation at two or more humans. The bot is a
+character prop, so the exclusion did not apply. After hit sound and damage,
+the PC combat adapter now skips that animation for a living, currently
+bound Simulant. Fatal hits still enter the original `ACT_DIE` path with
+native kill messaging and one score credit. Campaign guards and the N64
+path are unchanged. The isolated life/reaction check and regional syntax
+checks pass; the Windows movement and final-hit presentation need a playtest.

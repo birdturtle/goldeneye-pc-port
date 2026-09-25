@@ -40,6 +40,7 @@
 #include "bg.h"
 #ifdef PORT
 #include <stdio.h>
+#include "mp_simulants.h"
 #include "romdata.h" /* D178: briefing-segment byte-order fixup */
 #endif
 #include "chrai.h"
@@ -2894,7 +2895,13 @@ void interface_menu06_modesel(void)
             sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE_SFX, 0);
         }
     }
-    else if ((243.0f <= cursor_v_pos) && (joyGetControllerCount() >= 2))
+    else if ((243.0f <= cursor_v_pos) && (joyGetControllerCount() >=
+#ifdef PORT
+        1
+#else
+        2
+#endif
+        ))
     {
         mission_difficulty_highlighted = DIFFICULTY_SECRET;
         if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON|Z_TRIG|A_BUTTON))
@@ -3042,7 +3049,13 @@ Gfx* constructor_menu06_modesel(Gfx* DL)
 
     x = 0x96;
     y = 0xFC;
-    if (joyGetControllerCount() >= 2)
+    if (joyGetControllerCount() >=
+#ifdef PORT
+        1
+#else
+        2
+#endif
+        )
     {
         text_color = 0xFF;
     }
@@ -4153,12 +4166,22 @@ u32 get_player_control_style(s32 playernum)
 s32 check_if_mp_stage_unlocked(s32 stage)
 {
     s32 players;
+#ifdef PORT
+    if (mpSimulantsGetCount() && multi_stage_setups[stage].stage_id != LEVELID_FACILITY)
+        return FALSE;
+#endif
     if (!multi_stage_setups[stage].min_player)
     {
         return FALSE;
     }
     players=get_selected_num_players();
-    if (multi_stage_setups[stage].max_player < players)
+    if (
+#ifndef PORT
+        multi_stage_setups[stage].max_player < players
+#else
+        players > 4
+#endif
+        )
     {
         return FALSE;
     }
@@ -4170,6 +4193,10 @@ s32 check_if_mp_stage_unlocked(s32 stage)
     {
         return TRUE;
     }
+#ifdef PORT
+    if (mpSimulantsGetCount() && multi_stage_setups[stage].stage_id == LEVELID_FACILITY)
+        return TRUE;
+#endif
     return FALSE;
 }
 
@@ -4342,12 +4369,23 @@ void init_mp_options_for_scenario(s32 numplayers)
 {
     s32 i;
 
+#ifdef PORT
+    if (numplayers < 1) numplayers = 1;
+    if (numplayers > 4) numplayers = 4;
+    {
+        mpSimulantsSetCount(numplayers, mpSimulantsGetCount());
+    }
+#else
     if (numplayers < 2)
     {
         numplayers = 2;
     }
+#endif
 
     selected_num_players = numplayers;
+#ifdef PORT
+    if (mpSimulantsGetCount()) MP_stage_selected = MP_STAGE_FACILITY;
+#endif
 
     for (i=0; i < selected_num_players; i++)
     {
@@ -4363,18 +4401,128 @@ void init_mp_options_for_scenario(s32 numplayers)
         }
     }
 
-    if ((mp_player_counts[scenario].max < selected_num_players) || (selected_num_players < mp_player_counts[scenario].min))
+    if ((mp_player_counts[scenario].max < selected_num_players
+#ifdef PORT
+         + mpSimulantsGetCount()
+#endif
+        ) || (selected_num_players
+#ifdef PORT
+              + mpSimulantsGetCount()
+#endif
+              < mp_player_counts[scenario].min))
     {
         reset_mp_options_for_scenario(SCENARIO_NORMAL);
 
     }
 
-    if (multi_stage_setups[MP_stage_selected].max_player < selected_num_players)
+    if (
+#ifndef PORT
+        multi_stage_setups[MP_stage_selected].max_player < selected_num_players
+#else
+        selected_num_players > 4
+#endif
+       )
     {
         MP_stage_selected = MP_STAGE_TEMPLE;
     }
 }
 
+
+#ifdef PORT
+/* A native dossier page reached through PLAYERS on the existing options
+ * sheet. Human viewports and AI participants remain separate choices. */
+static void init_mp_simulants(void)
+{
+    tab_prev_selected = FALSE;
+    tab_prev_highlight = FALSE;
+    load_walletbond();
+}
+
+static void interface_mp_simulants(void)
+{
+    int row;
+    viSetFovY(FOV_Y_F);
+    viSetAspect(ASPECT_RATIO_SD);
+    viSetZRange(100.0f, 10000.0f);
+    viSetUseZBuf(0);
+    row = cursor_v_pos < 0x8d ? 0 : 1;
+    tab_prev_highlight = frontCheckCursorOnPreviousTab();
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, B_BUTTON) ||
+        (tab_prev_highlight && joyGetButtonsPressedThisFrame(PLAYER_1, A_BUTTON|Z_TRIG|START_BUTTON))) {
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+        frontChangeMenu(MENU_MP_OPTIONS, FALSE);
+        return;
+    }
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, A_BUTTON|Z_TRIG)) {
+        if (row == 0) {
+            int next = selected_num_players + 1;
+            if (next > joyGetControllerCount() || next > 4) next = 1;
+            init_mp_options_for_scenario(next);
+            if (next == 1 && mpSimulantsGetCount() == 0)
+                mpSimulantsSetCount(1, 1);
+        } else {
+            mpSimulantsSetCount(selected_num_players, !mpSimulantsGetCount());
+            if (mpSimulantsGetCount()) {
+                MP_stage_selected = MP_STAGE_FACILITY;
+                reset_mp_options_for_scenario(SCENARIO_NORMAL);
+            }
+        }
+        sndPlaySfx(g_musicSfxBufferPtr, DOOR_METAL_CLOSE2_SFX, NULL);
+    }
+    if (joyGetButtonsPressedThisFrame(PLAYER_1, START_BUTTON))
+        frontChangeMenu(MENU_MP_OPTIONS, FALSE);
+    disable_all_switches(walletinst[0]);
+    set_item_visibility_in_objinstance(walletinst[0], SW_TABS, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_PAPER, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_OHMSS, 1);
+    set_item_visibility_in_objinstance(walletinst[0], SW_CONFIDENTIAL2, 1);
+    frontUpdateControlStickPosition();
+}
+
+static Gfx *constructor_mp_simulants(Gfx *DL)
+{
+    int x, y, w, h;
+    char slot[48];
+    const char *label[2] = { "HUMAN PLAYERS", "SIMULANTS" };
+    DL = frontSetupMenuBackground(DL);
+    DL = microcode_constructor(DL);
+    x = 0x37; y = 0x5f;
+    DL = frontPrintText(DL, &x, &y, "PLAYERS", ptrFontZurichBoldChars,
+                        ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+    for (int i = 0; i < 2; ++i) {
+        int value = i ? mpSimulantsGetCount() : selected_num_players;
+        y = 0x79 + 20 * i;
+        textMeasure(&h, &w, (char *)label[i], ptrFontZurichBoldChars, ptrFontZurichBold, 0);
+        if (!frontCheckCursorOnPreviousTab() &&
+            (cursor_v_pos < 0x8d ? 0 : 1) == i)
+            DL = microcode_constructor_related_to_menus(DL, 0x37, y - 1, w + 0x3c, y + 14, 0x32);
+        x = 0x39;
+        DL = frontPrintText(DL, &x, &y, (char *)label[i], ptrFontZurichBoldChars,
+                            ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+        sprintf(slot, "%d", value); x = 0xa0; y = 0x79 + 20 * i;
+        DL = frontPrintText(DL, &x, &y, slot, ptrFontZurichBoldChars,
+                            ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+    }
+    for (int i = 0; i < 4; ++i) {
+        const char *kind = i < selected_num_players ? "HUMAN" :
+                           i < selected_num_players + mpSimulantsGetCount() ? "SIMULANT" : "EMPTY";
+        sprintf(slot, "%d  %s", i + 1, kind);
+        x = 0x39; y = 0xb5 + i * 20;
+        DL = frontPrintText(DL, &x, &y, slot, ptrFontZurichBoldChars,
+                            ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+    }
+    if (selected_num_players + mpSimulantsGetCount() < 2) {
+        x = 0x39; y = 0x105;
+        DL = frontPrintText(DL, &x, &y, "2 COMBATANTS REQUIRED", ptrFontZurichBoldChars,
+                            ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+    }
+    x = 0x39; y = 0x119;
+    DL = frontPrintText(DL, &x, &y, "SIMULANT: 1 HUMAN / FACILITY", ptrFontZurichBoldChars,
+                        ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
+    DL = frontAddPreviousTabText(DL);
+    return frontDrawCursor(DL);
+}
+#endif
 
 //********************************************************************************************************
 //MULTIPLAYER OPTIONS
@@ -4402,6 +4550,9 @@ void init_menu0E_mpoptions(void)
     if (selected_num_players == 0)
     {
         numplayers = joyGetControllerCount();
+#ifdef PORT
+        if (numplayers < 2) mpSimulantsSetCount(1, 1);
+#endif
         init_mp_options_for_scenario(numplayers);
     }
 
@@ -4449,7 +4600,13 @@ void interface_menu0E_mpoptions(void)
     viSetZRange(100.0f, 10000.0f);
     viSetUseZBuf(0);
 
-    if (joyGetControllerCount() < 2)
+    if (joyGetControllerCount() <
+#ifdef PORT
+        1
+#else
+        2
+#endif
+        )
     {
         frontChangeMenu(MENU_MODE_SELECT, 0);
         setCursorPOSforMode(gamemode);
@@ -4602,6 +4759,10 @@ void interface_menu0E_mpoptions(void)
 
     if (tab_start_selected)
     {
+#ifdef PORT
+        if (!mpSimulantsCanStart(selected_num_players, joyGetControllerCount()))
+            return;
+#endif
         if (multi_stage_setups[MP_stage_selected].stage_id < 0)
         {
             s32 temp_hi;
@@ -4615,6 +4776,12 @@ void interface_menu0E_mpoptions(void)
         {
             selected_stage = multi_stage_setups[MP_stage_selected].stage_id;
         }
+#ifdef PORT
+        if (mpSimulantsGetCount() && selected_stage != LEVELID_FACILITY) {
+            selected_stage = LEVELID_FACILITY;
+            MP_stage_selected = MP_STAGE_FACILITY;
+        }
+#endif
 
         briefingpage = -1;
         frontChangeMenu(MENU_RUN_STAGE, 1);
@@ -4624,6 +4791,9 @@ void interface_menu0E_mpoptions(void)
 
     if (players_selected)
     {
+#ifdef PORT
+        frontChangeMenu(MENU_MP_SIMULANTS, 0);
+#else
         s32 tmpNumPlayers;
 
         if (joyGetControllerCount() < selected_num_players + 1)
@@ -4636,6 +4806,7 @@ void interface_menu0E_mpoptions(void)
         }
 
         init_mp_options_for_scenario(tmpNumPlayers);
+#endif
 
         return;
     }
@@ -4831,7 +5002,12 @@ Gfx * constructor_menu0E_mpoptions(Gfx *DL)
   }
   DL = frontPrintText(DL,&x,&y,text,ptrFontZurichBoldChars,ptrFontZurichBold,entry,viGetX(),viGetY(),0,0);
 
-  sprintf(acStack12,"%d",selected_num_players);
+  #ifdef PORT
+  if (mpSimulantsGetCount())
+    sprintf(acStack12,"%d + %d SIM",selected_num_players,mpSimulantsGetCount());
+  else
+  #endif
+    sprintf(acStack12,"%d",selected_num_players);
   x = 0xa0;
   y = 0x79;
   DL = frontPrintText(DL, &x, &y, acStack12, ptrFontZurichBoldChars, ptrFontZurichBold, 0xff, viGetX(), viGetY(), 0, 0);
@@ -6186,8 +6362,20 @@ void interface_menu13_mpscenario(void)
             {
                 if (
                     (s32)cursor_v_pos  >=  (0x83 + (-i * -0x16))
-                    && (mp_player_counts[i].min <= get_selected_num_players())
-                    && (get_selected_num_players() <= mp_player_counts[i].max))
+                    && (mp_player_counts[i].min <= get_selected_num_players()
+#ifdef PORT
+                        + mpSimulantsGetCount()
+#endif
+                        )
+                    && (get_selected_num_players()
+#ifdef PORT
+                        + mpSimulantsGetCount()
+#endif
+                        <= mp_player_counts[i].max)
+#ifdef PORT
+                    && (!mpSimulantsGetCount() || i == SCENARIO_NORMAL)
+#endif
+                    )
                 {
                     dword_CODE_bss_80069780 = i + 1;
                     break;
@@ -6281,7 +6469,19 @@ Gfx * constructor_menu13_mpscenario(Gfx *DL)
     {
         var_s3 = 0xff;
 
-        if (((s32) mp_player_counts[i].max < get_selected_num_players()) || (get_selected_num_players() < (s32) mp_player_counts[i].min))
+        if (((s32) mp_player_counts[i].max < get_selected_num_players()
+#ifdef PORT
+              + mpSimulantsGetCount()
+#endif
+             ) || (get_selected_num_players()
+#ifdef PORT
+                    + mpSimulantsGetCount()
+#endif
+                    < (s32) mp_player_counts[i].min)
+#ifdef PORT
+            || (mpSimulantsGetCount() && i != SCENARIO_NORMAL)
+#endif
+           )
         {
             var_s3 = 0x70;
         }
@@ -8630,6 +8830,9 @@ static const char *d243MenuName(MENU m)
         case MENU_MISSION_FAILED:      return "MENU_MISSION_FAILED";
         case MENU_MISSION_COMPLETE:    return "MENU_MISSION_COMPLETE";
         case MENU_MP_OPTIONS:          return "MENU_MP_OPTIONS";
+#ifdef PORT
+        case MENU_MP_SIMULANTS:        return "MENU_MP_SIMULANTS";
+#endif
         case MENU_MP_SCENARIO_SELECT:  return "MENU_MP_SCENARIO_SELECT";
         case MENU_MP_CHAR_SELECT:      return "MENU_MP_CHAR_SELECT";
         case MENU_MP_TEAMS:            return "MENU_MP_TEAMS";
@@ -8735,6 +8938,9 @@ void menu_init(void)
             case MENU_MISSION_FAILED:         update_menu0C_missionfailed();        break;
             case MENU_MISSION_COMPLETE:       update_menu0D_missioncomplete();      break;
             case MENU_MP_OPTIONS:             update_menu0E_mpoptions();            break;
+#ifdef PORT
+            case MENU_MP_SIMULANTS:           break;
+#endif
             case MENU_MP_SCENARIO_SELECT:     update_menu13_mpscenario();           break;
             case MENU_MP_CHAR_SELECT:         update_menu0F_mpcharsel();            break;
             case MENU_MP_TEAMS:               update_menu14_mpteams();              break;
@@ -8788,6 +8994,9 @@ void menu_init(void)
             case MENU_MISSION_FAILED:         init_menu0C_missionfailed();          break;
             case MENU_MISSION_COMPLETE:       init_menu0D_missioncomplete();        break;
             case MENU_MP_OPTIONS:             init_menu0E_mpoptions();              break;
+#ifdef PORT
+            case MENU_MP_SIMULANTS:           init_mp_simulants();                  break;
+#endif
             case MENU_MP_SCENARIO_SELECT:     init_menu13_mpscenariosel();          break;
             case MENU_MP_CHAR_SELECT:         init_menu0f_mpcharsel();              break;
             case MENU_MP_TEAMS:               init_menu14_mpteamsel();              break;
@@ -8817,6 +9026,9 @@ void menu_init(void)
         case MENU_MISSION_FAILED:         interface_menu0C_missionfailed();         break;
         case MENU_MISSION_COMPLETE:       interface_menu0D_missioncomplete();       break;
         case MENU_MP_OPTIONS:             interface_menu0E_mpoptions();             break;
+#ifdef PORT
+        case MENU_MP_SIMULANTS:           interface_mp_simulants();                 break;
+#endif
         case MENU_MP_SCENARIO_SELECT:     interface_menu13_mpscenario();            break;
         case MENU_MP_CHAR_SELECT:         interface_menu0F_mpcharsel();             break;
         case MENU_MP_TEAMS:               interface_menu14_mpteams();               break;
@@ -8901,6 +9113,11 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
         case MENU_MP_OPTIONS:
             DL = constructor_menu0E_mpoptions(DL);
             break;
+#ifdef PORT
+        case MENU_MP_SIMULANTS:
+            DL = constructor_mp_simulants(DL);
+            break;
+#endif
         case MENU_MP_SCENARIO_SELECT:
             DL = constructor_menu13_mpscenario(DL);
             break;
@@ -8934,5 +9151,3 @@ Gfx * menu_jump_constructor_handler(Gfx *DL)
 
     return DL;
 }
-
-

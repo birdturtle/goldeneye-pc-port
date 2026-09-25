@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "simulant_probe.h"
+#include "mp_simulants.h"
 #include "model_life.h"
 #endif
 #include "bondview.h"
@@ -419,7 +420,11 @@ void bossMainloop(void)
         {
             stringIndex = -1;
 
-            if (g_StageNum != LEVELID_TITLE && get_selected_num_players() >= 2)
+            if (g_StageNum != LEVELID_TITLE && (get_selected_num_players() >= 2
+#ifdef PORT
+                || mpSimulantsIsMatch()
+#endif
+                ))
             {
                 stringIndex = 0;
 

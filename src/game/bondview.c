@@ -34,6 +34,9 @@
 #include "model.h"
 #include "mp_music.h"
 #include "mpmenu.h"
+#ifdef PORT
+#include "mp_simulants.h"
+#endif
 #include "objecthandler.h"
 #include "objective_status.h"
 #include "os_extension.h"
@@ -1361,7 +1364,11 @@ s32 bondviewGetRandomSpawnPadIndex(void)
  */
 void init_player_BONDdata(void)
 {
-    if (getPlayerCount() >= 2)
+    if (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        )
     {
         g_CurrentPlayer->controldef = get_player_control_style(get_cur_playernum());
         cur_player_set_control_type(get_player_control_style(get_cur_playernum()));
@@ -1513,7 +1520,11 @@ void bondviewPlayerBeginLife(void)
 
     bondinvAddInvItem(ITEM_FIST);
 
-    if (getPlayerCount() >= 2)
+    if (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        )
     {
         currentPlayerEquipWeaponWrapper(GUNLEFT, starting_weapon[GUNLEFT]);
         currentPlayerEquipWeaponWrapper(GUNRIGHT, starting_weapon[GUNRIGHT]);

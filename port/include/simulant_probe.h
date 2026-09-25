@@ -1,6 +1,9 @@
 #ifndef GE_SIMULANT_PROBE_H
 #define GE_SIMULANT_PROBE_H
 
+struct PropRecord;
+struct PropRecord *simulantProbeGetProp(void);
+
 /* Temporary PC-only proof that an AI character can exist beside MP players. */
 void simulantProbePoll(void);
 /* Allow the probe to use stage data only after lvlStageLoad has returned. */

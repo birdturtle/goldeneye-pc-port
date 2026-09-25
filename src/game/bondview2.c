@@ -38,6 +38,9 @@
 #include "model.h"
 #include "mp_music.h"
 #include "mpmenu.h"
+#ifdef PORT
+#include "mp_simulants.h"
+#endif
 #include "objecthandler.h"
 #include "objective_status.h"
 #include "os_extension.h"
@@ -454,7 +457,11 @@ void solo_char_load(void)
 
         bondviewDeregisterPlayerRoom(g_CurrentPlayer);
 
-        if (getPlayerCount() == 1)
+        if (getPlayerCount() == 1
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+            )
         {
             helddst = fileGetBondForCurrentFolder();
             switch (g_CurrentPlayer->bondtype)
@@ -576,7 +583,11 @@ void solo_char_load(void)
             item = starting_weapon[GUNRIGHT];
         }
 
-        if (getPlayerCount() == 1)
+        if (getPlayerCount() == 1
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+            )
         {
             remove_item_in_hand(GUNLEFT);
             remove_item_in_hand(GUNRIGHT);
@@ -700,7 +711,11 @@ void solo_char_load(void)
 
         if (prop >= 0)
         {
-            if (getPlayerCount() == 1)
+            if (getPlayerCount() == 1
+#ifdef PORT
+                && !mpSimulantsIsMatch()
+#endif
+                )
             {
                 helddst      = cursor;
                 helddst      = ((s32)weaponbuf0) + helddst;
@@ -1016,7 +1031,11 @@ void bondviewSetCameraMode(s32 arg0)
             currentPlayerSetFadeFrac(60.0f, 0.0f);
         }
 
-        if (getPlayerCount() >= 2)
+        if (getPlayerCount() >= 2
+#ifdef PORT
+            || mpSimulantsIsMatch()
+#endif
+            )
         {
             fogLoadLevelEnvironment(bossGetStageNum(), 0);
         }
@@ -1846,7 +1865,11 @@ void currentPlayerSetYAutoAimEnabled(bool enabled)
  */
 bool currentPlayerGetYAutoAimEnabled(void)
 {
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         return g_CurrentPlayer->autoyaimenabled;
     }
@@ -1910,7 +1933,11 @@ void currentPlayerSetXAutoAimEnabled(bool enabled)
  */
 bool currentPlayerGetXAutoAimEnabled(void)
 {
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         return g_CurrentPlayer->autoxaimenabled;
     }
@@ -5098,7 +5125,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             (g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x5
                 && g_CurrentPlayer->open_close_solo_watch_menu)
         )
-        && (getPlayerCount() == 1))
+        && (getPlayerCount() == 1
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+           ))
     {
         trigger_solo_watch_menu(0);
     }
@@ -5106,7 +5137,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
     if (g_CurrentPlayer->watch_animation_state == WATCH_ANIMATION_0x0
         && g_CurrentPlayer->bonddead == FALSE
         && (
-            getPlayerCount() == 1
+            (getPlayerCount() == 1
+#ifdef PORT
+             && !mpSimulantsIsMatch()
+#endif
+            )
             || (
                 g_stopPlayFlag == 0
                 && g_gameOverFlag == 0)))
@@ -5718,7 +5753,11 @@ void bondviewProcessInput(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
         moveData.speedVertaUp = ftemp_nostack_spE8;
     }
 
-    if (bondviewGetIfCurrentPlayerDamageShowTime() && getPlayerCount() == 1)
+    if (bondviewGetIfCurrentPlayerDamageShowTime() && getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         moveData.triggerOn = 0;
     }
@@ -8259,8 +8298,16 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
     gunSetSightVisible(
         GUNSIGHTREASON_1,
-        (getPlayerCount() == 1 && cur_player_get_sight_onscreen_control())
-            || (getPlayerCount() >= 2 && g_playerPerm->sight)
+        (getPlayerCount() == 1
+#ifdef PORT
+         && !mpSimulantsIsMatch()
+#endif
+         && cur_player_get_sight_onscreen_control())
+            || ((getPlayerCount() >= 2
+#ifdef PORT
+                 || mpSimulantsIsMatch()
+#endif
+                ) && g_playerPerm->sight)
     );
 
 #if defined(VERSION_EU)
@@ -8945,7 +8992,11 @@ void mp_respawn_handler(void)
     bondviewClearUpperTextDisplayFlag(-1);
 
 
-    if ((getPlayerCount() >= 2) && (startpadcount > 0))
+    if ((getPlayerCount() >= 2
+#ifdef PORT
+          || mpSimulantsIsMatch()
+#endif
+         ) && (startpadcount > 0))
     {
         var_v1 = bondviewGetRandomSpawnPadIndex();
     }
@@ -9290,7 +9341,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
         }
     }
 
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         display_objective_status_text_on_status_change();
     }
@@ -9308,7 +9363,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
             if (doblood)
             {
                 die_blood_image_routine(0);
-                if (getPlayerCount() == 1)
+                if (getPlayerCount() == 1
+#ifdef PORT
+                    && !mpSimulantsIsMatch()
+#endif
+                    )
                 {
                     // This unusual comma-expression syntax is required for a byte match.
                     set_missionstate((musicStopSlot(-1), 0));
@@ -9360,7 +9419,11 @@ Gfx *maybe_mp_interface(Gfx *gdl)
                 }
                 if (currentPlayerIsFadeComplete())
                 {
-                    if (getPlayerCount() == 1)
+                    if (getPlayerCount() == 1
+#ifdef PORT
+                        && !mpSimulantsIsMatch()
+#endif
+                        )
                     {
                         bondviewSetCameraMode(CAMERAMODE_DEATH_CAM_SP);
                     }
@@ -9473,7 +9536,11 @@ void bondviewKillCurrentPlayer(void)
 {
     if ((g_CurrentPlayer->cheatBondInvincible == 0) && (g_CurrentPlayer->bonddead == FALSE))
     {
-        if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x0)
+        if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x0
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+            )
         {
             trigger_solo_watch_menu(1);
         }
@@ -9540,7 +9607,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         hudMakeDamageSegments(g_CurrentPlayer->health_display_values, 0x2E, -1, currentPlayerGetHealth());
     }
 
-    if (getPlayerCount() < 2 || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
+    if ((getPlayerCount() < 2
+#ifdef PORT
+         && !mpSimulantsIsMatch()
+#endif
+        ) || (g_stopPlayFlag == 0 && g_gameOverFlag == 0))
     {
         if (g_PlayerIsInTank == 1)
         {
@@ -9557,7 +9628,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
             }
         }
 
-        if (getPlayerCount() >= 2 && get_scenario() == SCENARIO_LTK)
+        if ((getPlayerCount() >= 2
+#ifdef PORT
+             || mpSimulantsIsMatch()
+#endif
+            ) && get_scenario() == SCENARIO_LTK)
         {
             // the damage dealt is always equivalent to how much health and armor the player has
             // the result of this is to always kill the player regardless of how much damage he can sustain
@@ -9565,14 +9640,22 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
         }
 
         if (g_CurrentPlayer->cheatBondInvincible == FALSE && g_CurrentPlayer->bonddead == FALSE && g_PlayerInvincible == FALSE &&
-            (g_CurrentPlayer->damageshowtime < 0 || (getPlayerCount() >= 2 && g_CurrentPlayer->damageshowtime == 0)))
+            (g_CurrentPlayer->damageshowtime < 0 || ((getPlayerCount() >= 2
+#ifdef PORT
+                || mpSimulantsIsMatch()
+#endif
+                ) && g_CurrentPlayer->damageshowtime == 0)))
         {
             if (g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x5 && g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0xc)
             {
                 g_CurrentPlayer->oldhealth = g_CurrentPlayer->bondhealth;
                 g_CurrentPlayer->oldarmour = g_CurrentPlayer->bondarmour;
 
-                if (getPlayerCount() >= 2)
+                if (getPlayerCount() >= 2
+#ifdef PORT
+                    || mpSimulantsIsMatch()
+#endif
+                    )
                 {
                     cur_player_num = get_cur_playernum();
                     angle = g_playerPointers[cur_player_num]->vv_theta - (360.0f - ((atan2f(vectorx, vectorz) * 180.0f) / 3.1415927f));
@@ -9607,7 +9690,11 @@ void record_damage_kills(f32 damage_amount, f32 vectorx, f32 vectorz, s32 player
 
                     if (g_CurrentPlayer->bondhealth <= 0.0f)
                     {
-                        if (getPlayerCount() >= 2)
+                        if (getPlayerCount() >= 2
+#ifdef PORT
+                            || mpSimulantsIsMatch()
+#endif
+                            )
                         {
                             sp2C = get_cur_playernum();
                             sp28 = 0;
@@ -10019,7 +10106,11 @@ void hudmsgBottomShow(char *string, s32 font, s32 arg2)
 {
     s32 abs_index;
     s32 index;
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         if (display_statusbar < 5)
         {
@@ -10061,7 +10152,11 @@ void hudmsgBottomShow(char *mess)
         assert(font);
         assert(strlen(mess)<=MAXMESSAGELEN);
     #endif
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         if (display_statusbar < 5)
         {
@@ -10103,7 +10198,11 @@ void bondviewIntroCameraTextTick(void)
         {
             g_CurrentPlayer->bondmesscnt -= g_ClockTimer;
 
-            if (getPlayerCount() == 1)
+            if (getPlayerCount() == 1
+#ifdef PORT
+                && !mpSimulantsIsMatch()
+#endif
+                )
             {
                 if (g_CurrentPlayer->bondmesscnt < 0)
                 {
@@ -10117,7 +10216,11 @@ void bondviewIntroCameraTextTick(void)
             }
         }
 
-        if ((getPlayerCount() == 1) && (g_CurrentPlayer->bondmesscnt < 0) && (display_statusbar > 0))
+        if ((getPlayerCount() == 1
+#ifdef PORT
+             && !mpSimulantsIsMatch()
+#endif
+            ) && (g_CurrentPlayer->bondmesscnt < 0) && (display_statusbar > 0))
         {
             if (display_statusbar >= 2)
             {
@@ -10148,7 +10251,11 @@ Gfx* hudmsgBottomRender(Gfx* arg0)
     if ((g_CurrentPlayer->hudmessoff == FALSE) && (g_CurrentPlayer->bondmesscnt >= 0) && (g_CurrentPlayer->mpmenuon == FALSE))
     {
         var_v1 = 0;
-        if (getPlayerCount() == 1)
+        if (getPlayerCount() == 1
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+            )
         {
             if ((u8) *stringbuffer_lowerleft[status_bar_text_buffer_index] != 0)
             {

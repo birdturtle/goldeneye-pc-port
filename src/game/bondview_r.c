@@ -2,6 +2,7 @@
 #ifdef PORT
 #include <stdio.h>
 #include <stdlib.h>
+#include "mp_simulants.h"
 #endif
 #include <memp.h>
 #include <bondconstants.h>
@@ -396,7 +397,11 @@ void bondviewLoadSetupIntroSection(void)
 
     if (startpadcount > 0)
     {
-        if ((getPlayerCount() >= 2) && (startpadcount > 0))
+        if ((getPlayerCount() >= 2
+#ifdef PORT
+             || mpSimulantsIsMatch()
+#endif
+            ) && (startpadcount > 0))
         {
             rand_pad_index = bondviewGetRandomSpawnPadIndex();
         }
@@ -468,7 +473,11 @@ void bondviewLoadSetupIntroSection(void)
     g_CurrentPlayer->field_3B8.f[1] = (g_CurrentPlayer->field_488.pos.f[1] / FIELD_3B8_FACTOR);
     g_CurrentPlayer->field_3B8.f[2] = (g_CurrentPlayer->field_488.pos.f[2] / FIELD_3B8_FACTOR);
 
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         bondviewSetCameraMode(CAMERAMODE_INTRO);
     }

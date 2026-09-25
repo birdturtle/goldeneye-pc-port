@@ -98,6 +98,7 @@ extern s32 selected_num_players;
 #define GE_MENU_MP_CHAR_SELECT 15
 #define GE_MENU_MP_CONTROL_STYLE 17
 #define GE_MENU_MP_TEAMS 20
+#define GE_MENU_MP_SIMULANTS 26
 
 /* D194 spazz diagnosis: game ticks batched into the current poll (lv.h).
  * Read-only; declared locally to avoid pulling lv.h's wider dependency set. */
@@ -651,7 +652,6 @@ void inputDestroy(void)
 void inputUpdate(void)
 {
     SDL_GameControllerUpdate();
-    simulantProbePoll();
 
     if (gamemode != GE_GAMEMODE_MULTI) {
         mpInitialized = 0;
@@ -834,7 +834,8 @@ static int inputMpActive(void)
     return gamemode == GE_GAMEMODE_MULTI && mpInitialized
         && (current_menu == GE_MENU_RUN_STAGE
             || (current_menu >= GE_MENU_MP_OPTIONS
-                && current_menu <= GE_MENU_MP_TEAMS));
+                && current_menu <= GE_MENU_MP_TEAMS)
+            || current_menu == GE_MENU_MP_SIMULANTS);
 }
 
 /* Test pads remain on spare slots; only real input devices can be swapped.

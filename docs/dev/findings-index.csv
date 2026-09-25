@@ -202,3 +202,4 @@ D321,CLOSED,D318 trigger chain fully mapped:,CLOSED — trigger chain mapped and
 D322,OPEN,Long-session audio degradation:,"OPEN — static triage done (teardown audit, mixer statelessness, D202-coverage check); ranked hypotheses:"
 D323,PARTIAL,MP respawn/quit corrupts model node pointers via under-allocated player inventory (InvItem 0x14 N64 vs 0x20 PC).,PARTIAL — root cause proven by hardware watchpoint; sizeof(*p_itemcur) allocation applied under PORT; Windows rebuild and repeated-match verification pending.
 D324,PARTIAL,"Vertex-store parent arrays allocate 0x14-byte N64 slots but use 0x18-byte PC structs, overwriting adjacent Vertex buffers during initialization.",PARTIAL — source/layout proof and PC-only typed allocation applied; Windows runtime validation pending.
+D325,PARTIAL,One-human multiplayer and first Facility Simulant route.,"PARTIAL — native setup, stage routing, score and radar compile; Windows runtime playtest pending."

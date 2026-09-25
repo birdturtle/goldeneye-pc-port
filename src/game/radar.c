@@ -6,6 +6,10 @@
 #include "player.h"
 #include "othermodemicrocode.h"
 #include "image_bank.h"
+#ifdef PORT
+#include "mp_roster.h"
+#include "simulant_probe.h"
+#endif
 
 
 /**
@@ -52,6 +56,9 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
     current_scenario = get_scenario();
     cur_playernum = get_cur_playernum();
     player_count = getPlayerCount();
+#ifdef PORT
+    if (mpRosterCount() > player_count) player_count = mpRosterCount();
+#endif
     
     if (player_count == 1)
     {
@@ -123,10 +130,21 @@ Gfx *display_red_blue_on_radar(Gfx *DL)
     {
         if (i != cur_playernum)
         {
-            if (g_playerPointers[i]->bonddead == FALSE)
+            if (
+#ifdef PORT
+                (i >= getPlayerCount() && simulantProbeGetProp()) ||
+                (i < getPlayerCount() && g_playerPointers[i]->bonddead == FALSE)
+#else
+                g_playerPointers[i]->bonddead == FALSE
+#endif
+               )
             {
                 f32 tt1;
+#ifdef PORT
+                other_player_prop = i < getPlayerCount() ? g_playerPointers[i]->prop : simulantProbeGetProp();
+#else
                 other_player_prop = g_playerPointers[i]->prop;
+#endif
                 player_prop = g_CurrentPlayer->prop;
 
                 temp_f20 = other_player_prop->pos.f[0] - player_prop->pos.f[0];

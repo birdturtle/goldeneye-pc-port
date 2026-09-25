@@ -17,6 +17,10 @@
 #include "mp_music.h"
 #include "file.h"
 #include "assets/obseg/text/LmpmenuE.h"
+#ifdef PORT
+#include "mp_roster.h"
+#include "mp_simulants.h"
+#endif
 
 #ifdef REFRESH_PAL
 #define MPMENU_YOFF 8   /* PAL: every text row sits 8 pixels lower */
@@ -307,7 +311,11 @@ void pauseAndLockControls(void)
 
 bool disablePlayerActionsWhenPausedOrInMpMenu(void)
 {
-    if (getPlayerCount() == 1)
+    if (getPlayerCount() == 1
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        )
     {
         return TRUE;
     }
@@ -343,7 +351,11 @@ void mpCalculateAwards(bool gameoverdelay)
     s32 prev_player_num;
     s32 duration;
 
+#ifdef PORT
+    struct AwardMetrics metrics[4] = {0};
+#else
     struct AwardMetrics metrics[4];
+#endif
 
     player_count = getPlayerCount();
     duration = getMissiontimer();
@@ -395,7 +407,11 @@ void mpCalculateAwards(bool gameoverdelay)
         metrics[i].num_deaths = 0;
         metrics[i].num_suicides = 0;
 
-        for (j = 0; j < get_selected_num_players(); j++)
+        for (j = 0; j < get_selected_num_players()
+#ifdef PORT
+             + mpSimulantsGetCount()
+#endif
+             ; j++)
         {
             metrics[i].num_deaths += g_playerPlayerData[j].kill_counts[i];
             if (i == j)
@@ -594,7 +610,11 @@ void mpwatchMenuTick(void)
         }
     }
 
-    if (player_count != 1)
+    if (player_count != 1
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        )
     {
         // If a player has their pause menu up when they die and the game isn't over, turn their menu off. 
         if ((g_CurrentPlayer->bonddead) && (!g_gameOverFlag))
@@ -839,6 +859,9 @@ s32 get_points_for_mp_player(s32 playernum)
     team_or_token = g_playerPlayerData[playernum].have_token_or_goldengun;
 
     player_count = getPlayerCount();
+#ifdef PORT
+    if (mpRosterCount() > player_count) player_count = mpRosterCount();
+#endif
 
     points = 0;
 
@@ -912,6 +935,9 @@ void write_playerrank_to_buffer(char *buffer, s32 playernum)
 
     scenario = get_scenario();
     count = getPlayerCount();
+#ifdef PORT
+    if (mpRosterCount() > count) count = mpRosterCount();
+#endif
 
     for (i = 0; i < count; i++)
     {
@@ -1087,6 +1113,9 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
  
     curplayernum = get_cur_playernum();
     player_count = getPlayerCount();
+#ifdef PORT
+    if (mpRosterCount() > player_count) player_count = mpRosterCount();
+#endif
     self_paused = 0;
  
     if (player_count == 1)
@@ -1324,6 +1353,14 @@ Gfx *mp_watch_menu_display(Gfx *gdl)
                     curplayernum == 1 ? (colour = current_colour) : (q = g_playerPlayerData[1].have_token_or_goldengun == g_playerPlayerData[curplayernum].have_token_or_goldengun ? same_team_colour : other_team_colour, colour = q);
 
                     gdl = display_text_for_playerdata_on_MP_menu(gdl, (viewleft + two_player_x_offset) + 80, x2 + (86 + MPMENU_YOFF), scores[1], colour);
+#ifdef PORT
+                    if (getPlayerCount() == 1 && mpRosterCount() == 2) {
+                        x = viewleft + two_player_x_offset + 93;
+                        y = x2 + 86 + MPMENU_YOFF;
+                        gdl = textRender(gdl, &x, &y, "SIM", ptrFontBankGothicChars,
+                                         ptrFontBankGothic, 0x00ff00b0, viGetX(), viGetY(), 0, 0);
+                    }
+#endif
                 }
                 else
                 {

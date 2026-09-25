@@ -2,6 +2,8 @@
 #include <math.h>
 #ifdef PORT
 #include <stdlib.h>
+#include "mp_simulants.h"
+#include "mp_roster.h"
 #endif
 #include <os_extension.h>
 #include <PR/libaudio.h>
@@ -480,7 +482,11 @@ void lvlStageLoad(s32 stage)
             s32 s3;
             player_data = (struct player_data *)&g_playerPlayerData[i];
 
-            if (getPlayerCount() == 1)
+            if (getPlayerCount() == 1
+#ifdef PORT
+                && !mpSimulantsIsMatch()
+#endif
+                )
             {
                 // s4 variable
                 player_data->autoaim = 0;
@@ -1051,6 +1057,10 @@ void lvlManageMpGame(void)
     g_GlobalTimer += g_ClockTimer;
 #ifdef PORT
     {
+        extern void simulantProbePoll(void);
+        simulantProbePoll();
+    }
+    {
         extern void d318WatchdogTick(void);
         extern void d318TimelineTick(void);
         d318WatchdogTick(); /* D318 permanent port-side deadlock recovery (findings D318) */
@@ -1072,7 +1082,11 @@ void lvlManageMpGame(void)
         }
     }
 
-    if ((getPlayerCount() >= 2) && (g_CurrentStageToLoad != LEVELID_TITLE))
+    if ((getPlayerCount() >= 2
+#ifdef PORT
+         || mpSimulantsIsMatch()
+#endif
+        ) && (g_CurrentStageToLoad != LEVELID_TITLE))
     {
         if (get_mission_state() == MISSION_STATE_6)
         {
@@ -1160,12 +1174,16 @@ void lvlManageMpGame(void)
             s32 mp_players_over_point_limit;
 
             var_player_count1 = getPlayerCount();
+#ifdef PORT
+            if (mpRosterCount() > var_player_count1)
+                var_player_count1 = mpRosterCount();
+#endif
             mp_player_currently_in_dying_animation = 0;
             mp_players_over_point_limit = 0;
 
             for (i = 0; i < var_player_count1; i++)
             {
-                if (g_playerPointers[i]->bonddead != FALSE &&
+                if (i < getPlayerCount() && g_playerPointers[i]->bonddead != FALSE &&
                     (g_playerPointers[i]->redbloodfinished == FALSE || g_playerPointers[i]->deathanimfinished == FALSE || g_playerPointers[i]->colourfadetimemax60 >= 0.0f))
                 {
                     mp_player_currently_in_dying_animation++;
@@ -1746,5 +1764,3 @@ f32 lvlGetPowerOnTimeSec(void)
 {
     return g_PowerOnTimeSec;
 }
-
-

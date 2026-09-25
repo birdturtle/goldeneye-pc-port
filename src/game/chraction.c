@@ -30,6 +30,10 @@
 #include "player.h"
 #include "propobj.h"
 #include "stan.h"
+#ifdef PORT
+#include "mp_combat.h"
+#include "mp_simulants.h"
+#endif
 
 /* D119: many sites below pun weapons_held[]->chr (really a WeaponObjRecord*)
  * as ChrRecord* and read .act_<x>.attack_item, which on N64 aliases
@@ -2242,7 +2246,10 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
             }
 
             chrDropItems(self);
-            increment_num_kills_display_text_in_MP();
+#ifdef PORT
+            if (mpCombatShouldCountNativeKill(self))
+#endif
+                increment_num_kills_display_text_in_MP();
 
             if (self->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
             {
@@ -2604,7 +2611,11 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
 
         damageToCause = gunItemGetDestructionAmount(weaponid);
 
-        if (isPlayer && (getPlayerCount() == 1))
+        if (isPlayer && (getPlayerCount() == 1
+#ifdef PORT
+            && !mpSimulantsIsMatch()
+#endif
+            ))
         {
             damageToCause *= g_AiHealthModifier;
         }
@@ -2680,6 +2691,10 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         else
         {
             self->chrflags |= CHRFLAG_WAS_DAMAGED;
+#ifdef PORT
+            if (damageToCause > 0.0f)
+                mpCombatNoteSimulantHit(self, isPlayer ? get_cur_playernum() : -1);
+#endif
 #    ifdef XBLA
             if (!cheatIsActive(76))
 #    endif
@@ -2701,6 +2716,14 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
             // Cancel current animation and prepare for argh
             f32 endframe2 = -1.0f; //sp30
             play_sound_for_shot_actor(self);
+
+#ifdef PORT
+            /* MP players keep moving after a nonfatal hit. The Simulant is
+             * still a chr, so skip its guard stagger but retain the native
+             * death action for a fatal hit. */
+            if (mpCombatSimulantKeepsMoving(self))
+                return TRUE;
+#endif
 
             if (chrlvAttackAnimationRelated7F026F30(self, &endframe2)) //chrIsAnimPreventingArgh
             {
@@ -2762,6 +2785,9 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
     }
 
     self->numarghs += 1;
+#ifdef PORT
+    mpCombatNoteSimulantHit(self, -1);
+#endif
     self->damage += damage;
     self->chrflags |= CHRFLAG_WAS_DAMAGED;
 
@@ -2839,7 +2865,10 @@ s32 chrlvExplosionDamage(ChrRecord *self, coord3d *arg1, f32 damage, s32 arg3)
         }
 
         chrDropItems(self);
-        increment_num_kills_display_text_in_MP();
+#ifdef PORT
+        if (mpCombatShouldCountNativeKill(self))
+#endif
+            increment_num_kills_display_text_in_MP();
 
         if (self->chrflags & CHRFLAG_COUNT_DEATH_AS_CIVILIAN)
         {

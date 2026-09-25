@@ -4,8 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "port_math.h"
+#include "random.h"
 
 #include "simulant_probe.h"
+#include "mp_roster.h"
+#include "mp_simulants.h"
+#include "mp_combat.h"
 #include "model_life.h"
 #include "player.h"
 #include "chrobjdata.h"
@@ -33,8 +37,6 @@ extern PropRecord *chrSpawnAtCoord(s32 body, s32 head, coord3d *pos,
                                    AIListRecord *ailist, s32 flags);
 extern waypoint *chrlvStanPathRelated(coord3d *pos, StandTile *stan);
 extern PropRecord *chrGiveWeapon(ChrRecord *chr, s32 model, ITEM_IDS item, s32 flags);
-extern void bondviewKillCurrentPlayer(void);
-extern void increment_num_deaths(void);
 
 /* This ID is outside the normal stage guard numbering (which starts at 5000).
  * The slot is checked against the current stage's array before each use. */
@@ -83,9 +85,47 @@ static waypoint *s_originalWaypoints;
 static waygroup *s_originalGroups;
 static int s_readyStage = -1;
 
+static int simProbeEnabled(void)
+{
+    const char *value = getenv("GE_MP_SIM_PROBE");
+    return mpSimulantsGetCount() > 0 ||
+           (value && value[0] == '1' && value[1] == '\0');
+}
+
+PropRecord *simulantProbeGetProp(void)
+{
+    if (mpRosterSlotForChr(SIM_PROBE_CHRNUM) < 0 || !g_ChrSlots) return NULL;
+    for (int i = 0; i < g_NumChrSlots; ++i) {
+        ChrRecord *chr = &g_ChrSlots[i];
+        if (chr->model && chr->chrnum == SIM_PROBE_CHRNUM &&
+            chr->actiontype != ACT_DIE && chr->actiontype != ACT_DEAD)
+            return chr->prop;
+    }
+    return NULL;
+}
+
+static int simProbeRosterTrace(void)
+{
+    const char *value = getenv("GE_MP_ROSTER_TRACE");
+    return value && value[0] == '1' && value[1] == '\0';
+}
+
 void simulantProbeStageReady(int stage)
 {
     s_readyStage = stage;
+    /* Human player data and viewports already exist. Reserve a match slot
+     * for the probe only if it fits beside them; the actor is bound on spawn. */
+    if (gamemode == GAMEMODE_MULTI && getPlayerCount() > 0) {
+        int humans = getPlayerCount();
+        int bots = simProbeEnabled() && humans < MP_ROSTER_MAX ? 1 : 0;
+        mpRosterBegin(stage, humans, bots);
+    } else {
+        mpRosterEnd();
+    }
+    if (simProbeRosterTrace() && mpRosterStage() == stage)
+        sysLogPrintf(LOG_NOTE, "sim roster: stage %d humans=%d simulants=%d total=%d",
+                     stage, mpRosterHumanCount(),
+                     mpRosterCount() - mpRosterHumanCount(), mpRosterCount());
     if (getenv("GE_D86")) {
         fprintf(stderr, "[D86] sim probe stage ready stage=%d\n", stage);
         fflush(stderr);
@@ -126,7 +166,10 @@ static void simProbeLogModel(const char *event, int body, int head, int id)
 
 void simulantProbeStageTeardown(void)
 {
+    if (simProbeRosterTrace() && mpRosterStage() >= 0)
+        sysLogPrintf(LOG_NOTE, "sim roster: end stage %d", mpRosterStage());
     s_readyStage = -1;
+    mpRosterEnd();
     /* Restore the stage's own tables after character/object cleanup, before
      * dropping the probe's route and any STAN-linked stage references. */
     if (g_CurrentSetup.pathwaypoints == simFacilityWaypoints && s_originalWaypoints)
@@ -329,59 +372,6 @@ static int simProbeSeekWeapon(ChrRecord *chr, unsigned polls, SimProbeRoute *rou
     return 1;
 }
 
-/* Damage a player with a non-player attacker. The original NPC shot helper
- * supplies playerid=-1 to record_damage_kills, which indexes multiplayer
- * score arrays with that value. Keep the original health/armor/death path,
- * but attribute no shot or kill to any human player slot. */
-static void simProbeDamagePlayer(int victim, float amount, float dx, float dz)
-{
-    static unsigned probeKills;
-    int previous = get_cur_playernum();
-    struct player *player;
-    if (victim < 0 || victim >= getPlayerCount() || victim >= 4 ||
-        !g_playerPointers[victim] || g_stopPlayFlag || g_gameOverFlag) return;
-
-    set_cur_player(victim);
-    player = g_CurrentPlayer;
-    if (!player->bonddead && !player->cheatBondInvincible && !g_PlayerInvincible &&
-        player->watch_animation_state != WATCH_ANIMATION_0x5 &&
-        player->watch_animation_state != WATCH_ANIMATION_0xc &&
-        (player->damageshowtime < 0 || player->damageshowtime == 0)) {
-        float damage = amount;
-        player->oldhealth = player->bondhealth;
-        player->oldarmour = player->bondarmour;
-        if (get_scenario() == SCENARIO_LTK) {
-            damage = player->bondhealth * player->actual_health +
-                     player->bondarmour * player->actual_armor;
-        }
-        if (damage <= player->bondarmour * player->actual_armor) {
-            player->bondarmour -= damage / player->actual_armor;
-        } else {
-            /* Match record_damage_kills' armor depletion and player death
-             * handling, without its playerid-indexed scoring writes. */
-            damage -= player->bondarmour / player->actual_armor;
-            player->bondarmour = 0.0f;
-            player->actual_armor = 1.0f;
-            player->bondhealth -= damage / player->actual_health;
-            if (player->bondhealth <= 0.0f) {
-                drop_inventory();
-                increment_num_deaths();
-                bondviewKillCurrentPlayer();
-                ++probeKills;
-                sysLogPrintf(LOG_NOTE, "sim probe: eliminated player %d (probe kills %u)",
-                             victim + 1, probeKills);
-            }
-        }
-        if (player->damageshowtime < 0) {
-            player->bondshotspeed.x += 2.0f * dx;
-            player->bondshotspeed.z += 2.0f * dz;
-        }
-        player->damageshowtime = 0;
-        player->healthshowtime = 0;
-    }
-    set_cur_player(previous);
-}
-
 /* A deliberately modest first engagement: no projectile or explosion paths,
  * and a wall/closed door blocks both target acquisition and damage. */
 static void simProbeCombat(ChrRecord *chr, unsigned polls, SimProbeRoute *route)
@@ -472,9 +462,10 @@ static void simProbeCombat(ChrRecord *chr, unsigned polls, SimProbeRoute *route)
                                            sound, NULL);
         if (playing) chrobjSndCreatePostEventDefault(playing, &chr->prop->pos);
     }
-    simProbeDamagePlayer(victim, 0.125f * gunItemGetDestructionAmount(item),
-                         dx / sqrtf(dx * dx + dz * dz + 1.0f),
-                         dz / sqrtf(dx * dx + dz * dz + 1.0f));
+    mpCombatDamageHuman(mpRosterSlotForChr(chr->chrnum), victim,
+                        0.125f * gunItemGetDestructionAmount(item),
+                        dx / sqrtf(dx * dx + dz * dz + 1.0f),
+                        dz / sqrtf(dx * dx + dz * dz + 1.0f));
 }
 
 /* GoldenEye owns route traversal, collision and doors. Periodically update
@@ -576,29 +567,27 @@ static void simProbeWalk(ChrRecord *chr, unsigned polls, SimProbeRoute *route)
 
 void simulantProbePoll(void)
 {
-    static int enabled = -1;
     SimProbeRuntime *probe = &s_probe;
     SimProbeRoute *route = &probe->route;
     int stage;
     PadRecord *bestPad = NULL;
     int bestPadIndex = -1;
-    float bestDistance = -1.0f;
+    int safePads = 0;
 
-    if (enabled < 0) {
-        const char *value = getenv("GE_MP_SIM_PROBE");
-        enabled = value && value[0] == '1' && value[1] == '\0';
-    }
-    if (!enabled) return;
+    if (!simProbeEnabled()) return;
 
     stage = lvlGetCurrentStageToLoad();
     /* inputUpdate can run during lvlStageLoad, before init_guards and
      * bodiesReset replace the previous match's stage-owned data. */
     if (stage != s_readyStage) return;
     if (current_menu != MENU_RUN_STAGE || gamemode != GAMEMODE_MULTI
-        || getPlayerCount() < 2 || stage <= 0) {
+        || getPlayerCount() < 1 || stage <= 0) {
         simProbeResetRuntime();
         return;
     }
+    /* The prototype is an extra actor, never a fifth combatant. */
+    int botSlot = mpRosterHumanCount();
+    if (mpRosterStage() != stage || botSlot >= mpRosterCount()) return;
     if (stage != probe->lastStage) {
         simProbeResetRuntime();
         probe->lastStage = stage;
@@ -617,6 +606,7 @@ void simulantProbePoll(void)
             if (chr->actiontype == ACT_DIE || chr->actiontype == ACT_DEAD) {
                 if (!probe->deathPoll) {
                     probe->deathPoll = probe->polls;
+                    mpCombatSimulantDied(botSlot, chr);
                     sysLogPrintf(LOG_NOTE, "sim probe: character died; waiting for corpse removal");
                 }
             }
@@ -626,6 +616,11 @@ void simulantProbePoll(void)
             }
             return;
         }
+    }
+    if (mpRosterSlotForChr(SIM_PROBE_CHRNUM) == botSlot) {
+        mpRosterUnbindSimulant(botSlot, SIM_PROBE_CHRNUM);
+        if (simProbeRosterTrace())
+            sysLogPrintf(LOG_NOTE, "sim roster: unbound slot %d", botSlot);
     }
     if (probe->deathPoll && probe->polls - probe->deathPoll < 180) return;
     if (probe->deathPoll) {
@@ -637,9 +632,9 @@ void simulantProbePoll(void)
     }
     if (probe->attempts >= 5 || probe->polls < probe->retryAfter) return;
 
-    /* GE's player start pads are valid in MP setups. The character spawn
-     * helper can accept an occupied VIEWER position, so explicitly require
-     * clearance from every living player before calling it. */
+    /* Pick uniformly from free multiplayer pads. The previous farthest-pad
+     * rule made the bot repeatedly appear on the opposite side of the map.
+     * GE's own spawn fallback uses 100 horizontal units of clearance. */
     for (int padIndex = 0; padIndex < startpadcount && padIndex < 16; ++padIndex) {
         PadRecord *pad = g_Startpad[padIndex];
         float nearest = 1.0e30f;
@@ -654,13 +649,13 @@ void simulantProbePoll(void)
             float distance = dx * dx + dz * dz;
             if (distance < nearest) nearest = distance;
         }
-        if (nearest > bestDistance) {
-            bestDistance = nearest;
+        if (nearest >= 100.0f * 100.0f &&
+            (randomGetNext() % (unsigned)++safePads) == 0) {
             bestPad = pad;
             bestPadIndex = padIndex;
         }
     }
-    if (!bestPad || bestDistance < 250.0f * 250.0f) {
+    if (!bestPad) {
         if (!probe->waitingForPadLogged) {
             sysLogPrintf(LOG_NOTE, "sim probe: waiting for an unoccupied multiplayer spawn pad");
             probe->waitingForPadLogged = 1;
@@ -713,6 +708,16 @@ void simulantProbePoll(void)
     memset(&spawned->chr->act_stand, 0, sizeof(spawned->chr->act_stand));
     chrlvMergeKneelToStand(spawned->chr, 16.0f);
     spawned->chr->chrnum = SIM_PROBE_CHRNUM;
+    if (!mpRosterBindSimulant(botSlot, SIM_PROBE_CHRNUM)) {
+        sysLogPrintf(LOG_WARNING, "sim probe: failed to bind match slot %d", botSlot);
+    } else {
+        mpCombatSpawnSimulant(botSlot, spawned->chr);
+        if (simProbeRosterTrace()) {
+            const MpRosterEntry *entry = mpRosterEntry(botSlot);
+            sysLogPrintf(LOG_NOTE, "sim roster: bound slot %d chrnum=%d life=%u",
+                         botSlot, SIM_PROBE_CHRNUM, entry->incarnation);
+        }
+    }
     probe->attempts = 0;
     simProbeResetRoute(route);
     route->retryAfter = probe->polls + 30;

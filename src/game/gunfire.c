@@ -40,6 +40,7 @@
 #ifdef PORT
 #include <stdlib.h>
 #include <stdio.h>
+#include "mp_simulants.h"
 /* D102: the 1P weapon Model and its RW-data pool were punned onto
  * hand->field_B68 / hand->modeldatas; on x86-64 struct Model (0xE8) is too
  * big for that layout and modelInit() aliases objinst->datas onto the pool
@@ -1216,7 +1217,11 @@ void gunCreateBeamForHand(enum GUNHAND hand)
 
     CapBeamLengthAndDecideIfRendered(weapon_beam, getCurrentPlayerWeaponId(hand), &hand_ptr->field_B58, &hand_ptr->item_related);
 
-    if ((g_CurrentPlayer->prop->chr == NULL) || (getPlayerCount() < 2)) 
+    if ((g_CurrentPlayer->prop->chr == NULL) || (getPlayerCount() < 2
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        ))
     { 
         return; 
     }
@@ -3153,7 +3158,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
             case ITEM_PITONGUN:
                 if (handptr->field_88C == 0)
                 {
-                    if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                    if ((getPlayerCount() == 1
+#ifdef PORT
+                         && !mpSimulantsIsMatch()
+#endif
+                        ) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                     {
                         handptr->field_87D = 1;
                     }
@@ -3185,7 +3194,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                 {
                     if (((s32) handptr->field_88C % bondwalkItemGetAutomaticFiringRate(var_s1)) == 0)
                     {
-                        if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                        if ((getPlayerCount() == 1
+#ifdef PORT
+                             && !mpSimulantsIsMatch()
+#endif
+                            ) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                         {
                             handptr->field_87D = 1;
                         }
@@ -3272,7 +3285,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
                     sp1B4 = 1;
                 }
 
-                if ((getPlayerCount() == 1) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
+                if ((getPlayerCount() == 1
+#ifdef PORT
+                     && !mpSimulantsIsMatch()
+#endif
+                    ) || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0)))
                 {
                     if (sp1B4 != 0)
                     {
@@ -3322,7 +3339,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
             handptr->field_890 = 0;
             handptr->field_88C = 0;
 
-            if ((getPlayerCount() == 1)
+            if ((getPlayerCount() == 1
+#ifdef PORT
+                 && !mpSimulantsIsMatch()
+#endif
+                )
 #if defined(VERSION_JP) || defined(VERSION_EU)
                 || ((checkGamePaused() == 0) && (g_CurrentPlayer->mpmenuon == 0))
 #else
@@ -3533,14 +3554,22 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     sp188 = WHEN_5_SP188_INIT;
     if (handptr->weapon_action_state == GUN_ANIM_STATE_SWITCH_LOWER)
     {
-        if (getPlayerCount() >= 2)
+        if (getPlayerCount() >= 2
+#ifdef PORT
+            || mpSimulantsIsMatch()
+#endif
+            )
         {
             sp188 = WHEN_5_SP188_MULTI;
         }
 
         if (handptr->field_88C == 0)
         {
-            if (getPlayerCount() == 1)
+            if (getPlayerCount() == 1
+#ifdef PORT
+                && !mpSimulantsIsMatch()
+#endif
+                )
             {
                 handptr->field_8B0 = WHEN_5_FLD8B0_SP;
             }
@@ -3555,7 +3584,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
             g_CurrentPlayer->ammoheldarr[get_ammo_type_for_weapon(var_s1)] += handptr->weapon_ammo_in_magazine;
             handptr->weapon_ammo_in_magazine = 0;
 
-            if (getPlayerCount() >= 2)
+            if (getPlayerCount() >= 2
+#ifdef PORT
+                || mpSimulantsIsMatch()
+#endif
+                )
             {
                 sub_GAME_7F09B368(hand);
             }
@@ -3642,14 +3675,22 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     {
         sp178 = WHEN_8_SP178_INIT;
 
-        if (getPlayerCount() >= 2)
+        if (getPlayerCount() >= 2
+#ifdef PORT
+            || mpSimulantsIsMatch()
+#endif
+            )
         {
             sp178 = WHEN_8_SP178_MULTI;
         }
 
         if (handptr->field_88C == 0)
         {
-            if (getPlayerCount() >= 2)
+            if (getPlayerCount() >= 2
+#ifdef PORT
+                || mpSimulantsIsMatch()
+#endif
+                )
             {
                 sub_GAME_7F09B398(hand);
             }
@@ -3978,7 +4019,11 @@ void gunTickHandState(enum GUNHAND hand, s32 triggerOn)
     {
         if ((handptr->field_88C == 0) && (var_s1 < 0x21))
         {
-            if (getPlayerCount() >= 2)
+            if (getPlayerCount() >= 2
+#ifdef PORT
+                || mpSimulantsIsMatch()
+#endif
+                )
             {
                 sub_GAME_7F09B398(hand);
             }
@@ -5183,7 +5228,11 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     cartridge_header = get_ptr_item_statistics(weaponid)->ptr_cartridge_struct;
  
     // Do not create ejected casings in multiplayer.
-    if ((cartridge_header == NULL) || (getPlayerCount() >= 2))
+    if ((cartridge_header == NULL) || (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        ))
     {
         return;
     }
@@ -5500,7 +5549,11 @@ void sub_GAME_7F068508(GUNHAND handnum, f32 floor_y_pos)
     cartridge_header = get_ptr_item_statistics(weaponid)->ptr_cartridge_struct;
  
     // Do not create ejected casings in multiplayer.
-    if ((cartridge_header == NULL) || (getPlayerCount() >= 2))
+    if ((cartridge_header == NULL) || (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        ))
     {
         return;
     }
@@ -6464,7 +6517,11 @@ void increment_num_kills_display_text_in_MP(void)
     g_playerPerm->kill_count += 1;
     g_CurrentPlayer->kills_this_life += 1;
 
-    if (getPlayerCount() < 2) { return; }
+    if (getPlayerCount() < 2
+#ifdef PORT
+        && !mpSimulantsIsMatch()
+#endif
+        ) { return; }
 
     mission_time = getMissiontimer();
     sprintf(&buffer, aSD, langGet(getStringID(LGUN, GUN_STR_DA_KILLCOUNT)), g_playerPerm->kill_count); // "kill count"
@@ -6534,7 +6591,11 @@ void increment_num_deaths(void)
 {
 	char buffer[256];
     g_CurrentPlayer->deathcount = (s32) (g_CurrentPlayer->deathcount + 1);
-    if (getPlayerCount() >= 2)
+    if (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        )
     {
         if (g_CurrentPlayer->deathcount == 1)
         {
@@ -6564,7 +6625,11 @@ void increment_num_suicides_display_MP(void) {
     s32 currentTime;
 
     g_CurrentPlayer->num_suicides += 1;
-    if (getPlayerCount() >= 2) {
+    if (getPlayerCount() >= 2
+#ifdef PORT
+        || mpSimulantsIsMatch()
+#endif
+        ) {
 
         currentTime = getMissiontimer();
 
