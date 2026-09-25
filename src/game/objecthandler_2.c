@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include "pcmodels.h" /* D50: PC-layout model sidecars (Plan B, D48/D49) */
 #include "pccg.h"     /* D69: PC-layout bg/stan sidecars */
+#include "model_life.h"
 extern resource_lookup_data_entry resource_lookup_data_array[]; /* ob.c */
 #endif
 
@@ -139,6 +140,10 @@ void load_object_fill_header(struct ModelFileHeader *objheader, u8 *name, u8* ds
     
     objheader->RootNode = (struct ModelNode *)&objheader->Textures[objheader->numtextures];
 
+#ifdef PORT
+    modelLifeWatchCheckpoint("RAW", (const char *)name, objheader);
+#endif
+
 #if defined(PORT) /* TEMP D86: correlate header identity with the model name at load time */
     if (getenv("GE_D86")) {
         fprintf(stderr, "[D86] load_object_fill_header name=%s objheader=%p filedata=%p RootNode=%p numSwitches=%d numtextures=%d\n",
@@ -148,7 +153,14 @@ void load_object_fill_header(struct ModelFileHeader *objheader, u8 *name, u8* ds
     }
 #endif
     sub_GAME_7F075A90(objheader, 0x5000000, filedata);
+#ifdef PORT
+    modelLifeWatchCheckpoint("PROMOTED", (const char *)name, objheader);
+#endif
     sub_GAME_7F0762E0(objheader, name, dst, buffer);
+#ifdef PORT
+    modelLifeWatchCheckpoint("PREPROCESSED", (const char *)name, objheader);
+    modelLifeLoaded(objheader, (const char *)name, filedata, dst != NULL);
+#endif
 }
 
 
@@ -156,6 +168,9 @@ void load_object_fill_header(struct ModelFileHeader *objheader, u8 *name, u8* ds
 
 void fileLoad(struct ModelFileHeader *header,char *name)
 {
+#ifdef PORT
+   modelLifeEvent("FILELOAD_ENTER", header);
+#endif
    load_object_fill_header(header,name,0,0,0);
    return;
 }
@@ -166,7 +181,6 @@ void load_object_into_memory_unused_maybe(struct ModelFileHeader *header,int *re
    load_object_fill_header(header,recallstring,targetloc,sizeleft,0);
    return;
 }
-
 
 
 

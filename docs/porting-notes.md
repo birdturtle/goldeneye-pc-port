@@ -44,7 +44,9 @@ state.
   `#ifdef PORT`.
 - Instances: D53.2 (ModelSlot pun), D56 (watch Model raw offsets), D57
   (rwdata record count), D67 (image_entry), D79 (bg_room_data), D98
-  (struct player alloc), D100 (player.model inline Model), D101/D102
+  (struct player alloc), D100 (player.model inline Model), D323 (inventory InvItem 0x14
+  N64 stride vs 0x20 PC allocation), D324 (vertex-store parent 0x14 N64
+  stride vs 0x18 PC), D101/D102
   (ModelNode*/weapon Model puns), D115 (gunfire THROW* raw offsets),
   D140 (watch Model punned into a `struct player` field-run: PC
   `sizeof(struct Model)` grows so the "fields" that aliased `.render_pos` /

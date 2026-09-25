@@ -3,6 +3,8 @@
 #ifdef PORT
 #include <stdlib.h>
 #include <stdio.h>
+#include "simulant_probe.h"
+#include "model_life.h"
 #endif
 #include "bondview.h"
 #include <bondconstants.h>
@@ -460,6 +462,9 @@ void bossMainloop(void)
             tokenSetString(memallocstringtable[stringIndex].string);
         }
 
+        #ifdef PORT
+        modelLifeStageBegin(g_StageNum);
+        #endif
         mempResetBank(MEMPOOL_STAGE);
         obBlankResourcesLoadedInBank(MEMPOOL_STAGE);
         if (tokenFind(1, "-ma"))
@@ -484,6 +489,11 @@ void bossMainloop(void)
         dynInitMemory();
         joyCheckStatusThreadSafe();
         lvlStageLoad(g_StageNum);
+#ifdef PORT
+        /* Input is polled while lvlStageLoad runs. The previous stage's
+         * character slots and setup can still be visible until it returns. */
+        simulantProbeStageReady(g_StageNum);
+#endif
         viInitBuffers();
         debmenuRefresh();
         waitForNextFrame();
@@ -746,7 +756,17 @@ void bossMainloop(void)
             }
         }
 
+#ifdef PORT
+        modelLifeStageCleanup();
+#endif
         lvlUnloadStageTextData();
+#ifdef PORT
+        /* Bot-only model definitions retain stage-owned node pointers in
+         * persistent c_item_entries headers. Cleanup has finished; clear
+         * those cached definitions before the stage bank can be reused. */
+        simulantProbeStageTeardown();
+        modelLifeStageEnd(g_StageNum);
+#endif
         stop_demo_playback();
         mempNullNextEntryInBank(MEMPOOL_STAGE);
         obBlankResourcesLoadedInBank(MEMPOOL_STAGE);

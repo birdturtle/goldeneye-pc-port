@@ -18,6 +18,9 @@
 #include "objecthandler.h"
 #include "quaternion.h"
 #include "random.h"
+#ifdef PORT
+#include "model_life.h"
+#endif
 
 
 typedef struct ModelGroupMtxBuildArg {
@@ -6532,6 +6535,9 @@ s32 modelCalculateRwDataIndexes(ModelNode *basenode)
 
 void modelCalculateRwDataLen(struct ModelFileHeader *objheader)
 {
+#ifdef PORT
+    modelLifeValidate("BEFORE_RWDATA_LEN", objheader);
+#endif
   #if defined(LEFTOVERDEBUG)
     objheader->isLoaded = 1;
   #endif
@@ -6736,6 +6742,10 @@ void animInit(struct Model *objinst, struct ModelFileHeader *header, u32 *data)
 // PD: model00023108
 void modelAttachPart(Model *pmodel, ModelFileHeader *pmodeldef, ModelNode *pnode, ModelFileHeader *cmodeldef)
 {
+#ifdef PORT
+    modelLifeValidate("ATTACH_PARENT_BEFORE", pmodeldef);
+    modelLifeValidate("ATTACH_CHILD_BEFORE", cmodeldef);
+#endif
     ModelRwData_HeadPlaceholderRecord *rwdata = modelGetNodeRwData(pmodel, pnode);
     ModelNode *node;
 
@@ -6758,6 +6768,13 @@ void modelAttachPart(Model *pmodel, ModelFileHeader *pmodeldef, ModelNode *pnode
     }
 
     pmodeldef->numRecords += modelCalculateRwDataIndexes(pnode->Child);
+#ifdef PORT
+    modelLifeAttachment("HEAD_ATTACH_MUTATION", pmodeldef, cmodeldef,
+                        pnode, pnode->Child,
+                        cmodeldef->RootNode ? cmodeldef->RootNode->Parent : NULL);
+    modelLifeEvent("ATTACH_PARENT_AFTER", pmodeldef);
+    modelLifeEvent("ATTACH_CHILD_AFTER", cmodeldef);
+#endif
 }
 
 

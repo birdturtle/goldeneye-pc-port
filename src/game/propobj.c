@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include "audiotrace.h"  /* D202/M-71 diag probe only ([DISTVOL]); remove with it */
 #include <stddef.h>
+#include "model_life.h"
 #endif
 #include <PR/libaudio.h>
 #include <assets/oddtextures.h>
@@ -12083,10 +12084,16 @@ PropRecord *something_with_generating_object(ChrRecord *self, s32 propid, ITEM_I
     if (!prop_header)
     {
         prop_header = PitemZ_entries[propid].header;
+#ifdef PORT
+        modelLifeValidate("HELD_WEAPON_BEFORE_MODELLOAD", (ModelFileHeader *)prop_header);
+#endif
         modelLoad(propid);
     }
 
     lastobjentry = chrpropAllocate();
+#ifdef PORT
+    modelLifeValidate("HELD_WEAPON_INSTANTIATE", (ModelFileHeader *)prop_header);
+#endif
     objinst = modelmgrInstantiateModel((ModelFileHeader *)prop_header);
 
     if (!weapon)
@@ -12195,6 +12202,9 @@ void chrRenderHeldWeapon(void *renderContext, GUNHAND hand, Gfx **gdl)
             if ((s32)(weaponObj->flags2 << 12) >= 0) 
             {
                 heldModel = weaponObj->model;
+#ifdef PORT
+                modelLifeValidate("HELD_WEAPON_RENDER", heldModel->obj);
+#endif
                 renderData = D_800322A4;
 
                 chrModel = chr->model;

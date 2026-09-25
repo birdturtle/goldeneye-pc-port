@@ -2,6 +2,7 @@
 #ifdef PORT
 #include <stdio.h>
 #include <stdlib.h>
+#include "model_life.h"
 #endif
 #include <memp.h>
 #include "game/mp_weapon.h"
@@ -1237,7 +1238,15 @@ void proplvreset2(enum LEVELID stageId)
      */
     for (pitem = PitemZ_entries; pitem < &PitemZ_entries[ARRAYCOUNT(PitemZ_entries) - 1]; pitem++)
     {
+#ifdef PORT
+        if (pitem->header->RootNode != NULL || pitem == &PitemZ_entries[PROP_CHRTT33])
+            modelLifeEvent("PROP_RESET_BEFORE", pitem->header);
+#endif
         pitem->header->RootNode = NULL;
+#ifdef PORT
+        if (pitem == &PitemZ_entries[PROP_CHRTT33])
+            modelLifeEvent("PROP_RESET_AFTER", pitem->header);
+#endif
     }
 
     if ((stageId <= (LEVELID_MAX + 1)) && setup_text_pointers[stageId])

@@ -104,6 +104,76 @@ static void crashStackTraceRaw(char *msg, PEXCEPTION_POINTERS exinfo)
     CRASH_MSG("MAIN MODULE: [%p]\n", crashGetModuleBase(crashInit));
 }
 
+/* A model-node AV often means its pointer was overwritten earlier. Capture
+ * key argument registers and their surrounding memory while the process
+ * is still alive. ReadProcessMemory reports an invalid address without
+ * faulting the exception handler itself. The addresses are deliberately
+ * labelled as registers rather than assumed to have one particular type:
+ * optimized builds can reuse them at other crash sites. */
+static void crashDumpArgumentMemory(char *msg, PEXCEPTION_POINTERS exinfo)
+{
+#if defined(PLATFORM_X86_64)
+    DWORD msglen = 0;
+    const CONTEXT *ctx = exinfo->ContextRecord;
+    const uintptr_t addresses[] = {
+        (uintptr_t)ctx->Rax, (uintptr_t)ctx->Rcx,
+        (uintptr_t)ctx->Rdx, (uintptr_t)ctx->R8
+    };
+    const char *names[] = { "RAX", "RCX", "RDX", "R8" };
+
+    CRASH_MSG("\nARGUMENT MEMORY (8-byte words):\n");
+    for (int reg = 0; reg < 4; reg++) {
+        uintptr_t addr = addresses[reg];
+        uint64_t words[12];
+        SIZE_T read = 0;
+
+        if (addr < 0x10000 || addr > UINTPTR_MAX - sizeof(words) ||
+            !ReadProcessMemory(GetCurrentProcess(), (const void *)addr,
+                               words, sizeof(words), &read) || read != sizeof(words)) {
+            CRASH_MSG("%s %p: unreadable\n", names[reg], (void *)addr);
+            continue;
+        }
+
+        CRASH_MSG("%s %p:", names[reg], (void *)addr);
+        for (int i = 0; i < 12; i++) {
+            CRASH_MSG(" +%02x=%016llx", i * 8,
+                      (unsigned long long)words[i]);
+            if (i == 5) CRASH_MSG("\n             ");
+        }
+        CRASH_MSG("\n");
+    }
+
+    /* Both process_15_subposition and modelGetNodeRwData receive Model* as
+     * their second or first argument respectively. Dump candidate model
+     * headers from RDX and RCX so either crash path can be identified. */
+    for (int reg = 1; reg <= 2; reg++) {
+        uintptr_t model = addresses[reg];
+        uintptr_t header = 0;
+        uint64_t words[5];
+        SIZE_T read = 0;
+
+        if (model >= 0x10000 && model <= UINTPTR_MAX - 24 &&
+            ReadProcessMemory(GetCurrentProcess(), (const void *)(model + 16),
+                              &header, sizeof(header), &read) &&
+            read == sizeof(header) && header >= 0x10000 &&
+            header <= UINTPTR_MAX - sizeof(words) &&
+            ReadProcessMemory(GetCurrentProcess(), (const void *)header,
+                              words, sizeof(words), &read) && read == sizeof(words)) {
+            CRASH_MSG("%s+10 candidate model header %p:",
+                      names[reg], (void *)header);
+            for (int i = 0; i < 5; i++) {
+                CRASH_MSG(" +%02x=%016llx", i * 8,
+                          (unsigned long long)words[i]);
+            }
+            CRASH_MSG("\n");
+        }
+    }
+#else
+    (void)msg;
+    (void)exinfo;
+#endif
+}
+
 /*
  * Phase 2 — backtrace by walking the EBP chain manually. The build keeps
  * frame pointers (-fno-omit-frame-pointer), so every frame is a pair of
@@ -152,6 +222,29 @@ static void crashStackTraceSym(char *msg, PEXCEPTION_POINTERS exinfo)
     }
     if (i == CRASH_MAX_FRAMES - 1) {
         CRASH_MSG("...\n");
+    }
+
+    /* Optimized callers can omit or reuse RBP. Keep the original walk and
+     * also record plausible return addresses from the bounded stack window;
+     * these are candidates, not an ordered call chain. */
+    {
+        uintptr_t sp = (uintptr_t)context.Rsp;
+        void *mainbase = crashGetModuleBase(crashInit);
+        int found = 0;
+        CRASH_MSG("STACK CODE CANDIDATES (offset from Rsp):\n");
+        if (sp >= (uintptr_t)low && sp < (uintptr_t)high) {
+            uintptr_t available = ((uintptr_t)high - sp) / sizeof(uintptr_t);
+            if (available > 256) available = 256;
+            for (uintptr_t off = 0; off < available && found < 16; off++) {
+                uintptr_t value = ((const uintptr_t *)sp)[off];
+                if (mainbase && value && crashGetModuleBase((void *)value) == mainbase) {
+                    CRASH_MSG("+%04llx: %p\n",
+                              (unsigned long long)(off * sizeof(uintptr_t)),
+                              (void *)value);
+                    found++;
+                }
+            }
+        }
     }
 #else
     snprintf(msg, CRASH_MAX_MSG, "\nBACKTRACE: not implemented on this arch\n");
@@ -285,6 +378,18 @@ static LONG __stdcall crashHandler(PEXCEPTION_POINTERS exinfo)
     fflush(stderr);
     fflush(stdout);
     crashWriteLog(msg, 0);
+
+    /* The raw context above is already on disk. Preserve model/node bytes
+     * from the faulting frame to distinguish bad sidecar data from a later
+     * overwrite or stale model on match exit. */
+    {
+        char details[CRASH_MAX_MSG + 1] = { 0 };
+        crashDumpArgumentMemory(details, exinfo);
+        if (details[0]) {
+            sysLogPrintf(LOG_ERROR, "%s", details);
+            crashWriteLog(details, 1);
+        }
+    }
 
     /* Phase 2: EBP-chain backtrace (validated reads only — see
      * crashStackTraceSym). The raw data is already on disk either way. */

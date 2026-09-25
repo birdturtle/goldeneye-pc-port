@@ -608,6 +608,8 @@ covers D24–D69; the log continues in §H (D32 procedure, D70–D121).
 | D320 | **D318-class sweep: aim-hold → `_update` AI lists in 8 levels carry the same as-authored softlock race (static analysis, 2026-09-20).** — full `## D320` entry at file tail | OPEN — static sweep complete (Facility ai_19, Control ai_9, Depot ai_12 flagged high/med-high; Bond-combat loops likely safe); no live confirmation beyond D318 itself; probe-verify path + generalized-watchdog recommendation documented. |
 | D321 | **D318 trigger chain fully mapped: tanks → combat bit is an authored ~3.5 s gas-cascade delay (chr 254 script); derail lands same-tick; PC behavior confirmed faithful to N64 (probe captures, 2026-09-20).** — full `## D321` entry at file tail | CLOSED — trigger chain mapped and faithful; D318 watchdog validated in live play. Optional deferred tuning: `D318_DEADLOCK_TICKS` 600→300 (user's call). |
 | D322 | **Long-session audio degradation: full campaign on v0.3.0 — audio progressively worsens from Silo, by Caverns/Cradle the OST is inaudible and SFX "come and go"; restarting the game restores it (issue #87, user report, 2026-09-21).** — full `## D322` entry at file tail | OPEN — static triage done (teardown audit, mixer statelessness, D202-coverage check); ranked hypotheses: voice-pool exhaustion/counter drift > queue starvation > evtq saturation. `GE_D322` pool-telemetry probe shipped; needs a campaign capture with `GE_D322=1 GE_D204=1`. |
+| D323 | **MP respawn/quit corrupts model node pointers via under-allocated player inventory (`InvItem` 0x14 N64 vs 0x20 PC).** — full `## D323` entry at file tail | PARTIAL — root cause proven by hardware watchpoint; `sizeof(*p_itemcur)` allocation applied under `PORT`; Windows rebuild and repeated-match verification pending. |
+| D324 | **Vertex-store parent arrays allocate 0x14-byte N64 slots but use 0x18-byte PC structs, overwriting adjacent Vertex buffers during initialization.** — full `## D324` entry at file tail | PARTIAL — source/layout proof and PC-only typed allocation applied; Windows runtime validation pending. No causal claim for the latest GDB watchpoint stop. |
 
 Phase 2 replaced the Phase-1 demo loop with the real `mainproc()` on real OS
 threads, compiled GE's real `src/sched.c`, and brought in PD's fast3d software
@@ -12239,3 +12241,29 @@ Full campaign (or at minimum Silo → Caverns/Cradle) with **`GE_D322=1 GE_D204=
 - All pools healthy while audio is bad → back to the mixer/reverb state classes (re-open M-65's ruled-out list with a long-session `GE_AUDIODUMP`).
 
 **Status:** OPEN — static triage complete, probe shipped, awaiting campaign capture. Cross-ref: D202/M-65+M-66b (ownerless-loop leak class + expiration), D207 (8-cap starvation design notes), D305 (pool/list desync observation), D204 (pipeline pacing + `GE_D204` monitor), D248/D250 (frame pacing, fixed), issue #87.
+
+
+## D323 — MP respawn corrupts TT33 model pointers through an undersized inventory allocation (2026-09-25)
+
+**First write, observed:** With `GE_MODEL_WATCH=Pchrtt33Z`, a GDB hardware watchpoint caught two consecutive 32-bit `0xffffffff` stores to the *upper halves* of `RootNode->Data` and `RootNode->Child` in `bondinvReinitInv` (`src/game/bondinv.c:17-20`). Both fields previously held zero-extended pointers (`0x00000000701edb8c`, `0x00000000701edba0`). The call came from `mp_respawn_handler` (`bondview2.c:8999`) while `maybe_mp_interface` ran inside `lvlRender`. The later model traversal fault is a downstream read, not the writer. `UNTRACKED` model-life events on `LOCAL` headers are a diagnostic tracking limitation and not evidence of this corruption.
+
+**Allocation contract:** `proplvreset2` in `src/game/prop.c:1522` calls `alloc_additional_item_slots` once per player. The latter allocates `equipmaxitems * 0x14` rounded to 16 bytes in `MEMPOOL_STAGE` (`src/game/inititemslots.c:17-20`). `InvItem` in `src/game/bondview.h:287-300` has widened pointers on x86-64, and the supplied binary's `bondinvReinitInv` indexes it with a 0x20 stride (`shl $0x5`, then `movl $0xffffffff,(%rdx)`). For the base count 30, the old block is 608 bytes but 30 PC items require 960 bytes. The reset loop can overwrite subsequent stage allocations. The two watched fields are 32 bytes apart, matching consecutive item writes.
+
+**Fix bucket:** N64 ABI/layout size transition under `AGENTS.md` rule 2's mechanical exception. Under `PORT`, size the inventory allocation by `sizeof(*g_CurrentPlayer->p_itemcur)` and preserve the same 16-byte rounding and original N64 path. Do not clear model headers to hide this overflow. Other inventory uses already index typed `InvItem *` and need no stride conversion. Source sweep found no other literal `0x14` inventory-slot allocation in `src/game` or `port/src`.
+
+**Verification still owed:** Build with MSYS2 MINGW64, rerun the first-match → quit/respawn → second-match and weapon-set-change cases with the diagnostic watch; expect only normal raw→promoted writes, no `NONZERO_HIGH` in the active allocation. Run no-bot and synthetic player bot controls and 10+ same/switch-map cycles. Only then mark the fix runtime-verified. This root cause explains the watched TT33 corruption; the earlier separate body-index crash remains unproven until rerun.
+
+**Status:** PARTIAL — first corrupting write proven, size fix applied, Windows runtime verification pending.
+
+
+## D324 — Vertex-store parent arrays retain N64 strides on 64-bit PC (2026-09-25)
+
+**Source and layout proof:** `sub_GAME_7F09B820` (`src/game/vtxstore.c:106-135`) allocates `dword_CODE_bss_8007A0E8` and `...A0EC` as `count * 0x14`, then initializes each as `struct unk_09B7A0_struct_parent`. The struct begins with `Vertex *` and is 0x18 on this 64-bit PC ABI (checked with a host compile-time assertion); `Vertex` itself remains 0x10. The code allocates a separate Vertex array immediately after each parent array. A typed initialization up to `count-1` uses a 0x18 stride and can cross into that subsequent allocation. In multiplayer, `...A0D4` is 0x50 (80 parents): 1600 bytes reserved, 1920 required. This is the same upstream allocation/consumer ABI mismatch as D323, at an independent stage initialization boundary.
+
+**Fix:** Under `PORT`, allocate both parent arrays using `sizeof(*pointer)`; retain the literal 0x14 N64 path and 0x10 Vertex array sizing. The memory-pool implementation (`memp.c`) receives only a caller-supplied byte count, so its bank-end check cannot detect writes crossing from one valid stage allocation into another. The corrective contract belongs at each typed allocation site, with layout checks and bounded runtime probes for remaining raw-size sites.
+
+**Evidence limit:** The latest attached excerpt ends at a GDB *hardware watchpoint* during zlib's next-stage reload into a retired TT33 address. It has no `SIGSEGV` line or game crash stack. D324 is a statically proven overflow but is not claimed as the cause of that unshown fault. The watch scaffold must retire on stage end and handle GDB's Unicode backtrace error so the next real fault can be captured.
+
+**Verification owed:** Windows rebuild; one/multiple-player stage load with vertex-store parent and Vertex boundary checks, followed by Facility→title→You Only Live Twice, same/switch-map 10+ cycles. Watch full first-write logs for any remaining invalid writes. Document any newly observed writer independently.
+
+**Status:** PARTIAL — source/layout violation proven, PC-size repair prepared, runtime validation pending.

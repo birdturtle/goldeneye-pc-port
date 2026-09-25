@@ -6,6 +6,9 @@
 #include "chrobjdata.h"
 #include "objecthandler.h"
 #include "model.h"
+#ifdef PORT
+#include "model_life.h"
+#endif
 
 s32 load_body_head_if_not_loaded(s32 model)
 {
@@ -47,11 +50,17 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
         scale *= 0.8f;
     }
 
+#ifdef PORT
+    modelLifeValidate("BODY_BEFORE_MAKEONEBODY", bodyHeader);
+#endif
     if (bodyHeader->RootNode == 0)
     {
         fileLoad(bodyHeader, c_item_entries[body].filename);
     }
 
+#ifdef PORT
+    modelLifeValidate("BODY_BEFORE_RWDATA_INDEXES", bodyHeader);
+#endif
     modelCalculateRwDataLen(bodyHeader);
 
     if ((c_item_entries[body].hasHead == 0) && (head >= 0))
@@ -68,6 +77,9 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
 #endif
             }
 
+#ifdef PORT
+            modelLifeValidate("HEAD_BEFORE_RWDATA_INDEXES", headHeader);
+#endif
             modelCalculateRwDataLen(headHeader);
 
             bodyHeader->numRecords += headHeader->numRecords;
@@ -101,6 +113,10 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
         {
             bodyHeader->numRecords -= headHeader->numRecords;
             modelAttachHead(model, opcode, headHeader);
+#ifdef PORT
+            modelLifeEvent("BODY_AFTER_HEAD_ATTACH", bodyHeader);
+            modelLifeEvent("HEAD_AFTER_HEAD_ATTACH", headHeader);
+#endif
 
             if ((sunglasses == 0) && ((s32) headHeader->numSwitches > 0))
             {

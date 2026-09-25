@@ -5,6 +5,9 @@
 #include "chr.h"
 #include "chrobjdata.h"
 #include "initguards.h"
+#ifdef PORT
+#include "model_life.h"
+#endif
 
 void init_guards(void) {
     animation_rate = 1.0f;
@@ -44,6 +47,10 @@ void bodiesReset(u32 stagenum)
   
     for (i=0; c_item_entries[i].header!=0; i++)
     {
+#ifdef PORT
+        if (c_item_entries[i].header->RootNode != NULL)
+            modelLifeEvent("CHR_RESET_BEFORE", c_item_entries[i].header);
+#endif
         c_item_entries[i].header->RootNode = (ModelNode*)0;
     }
 #if defined(ISGOLDFINGER) || defined(IS_NSNA)

@@ -106,9 +106,22 @@ void sub_GAME_7F09B820(void)
     }
 
     tmp = 0x14;
+#ifdef PORT
+    /* D324: the parent record contains a pointer and grows from 0x14 to
+     * 0x18 on x86-64. Both arrays are indexed as typed records below; an
+     * N64-sized allocation overwrites the following Vertex arrays. */
+    dword_CODE_bss_8007A0E8 = mempAllocBytesInBank(
+        dword_CODE_bss_8007A0D4 * sizeof(*dword_CODE_bss_8007A0E8), MEMPOOL_STAGE);
+#else
     dword_CODE_bss_8007A0E8 = mempAllocBytesInBank(dword_CODE_bss_8007A0D4 * tmp, MEMPOOL_STAGE);
+#endif
     dword_CODE_bss_8007A0E0 = mempAllocBytesInBank(dword_CODE_bss_8007A0D0 * 0x10, MEMPOOL_STAGE);
+#ifdef PORT
+    dword_CODE_bss_8007A0EC = mempAllocBytesInBank(
+        dword_CODE_bss_8007A0DC * sizeof(*dword_CODE_bss_8007A0EC), MEMPOOL_STAGE);
+#else
     dword_CODE_bss_8007A0EC = mempAllocBytesInBank(dword_CODE_bss_8007A0DC * tmp, MEMPOOL_STAGE);
+#endif
     dword_CODE_bss_8007A0E4 = mempAllocBytesInBank(dword_CODE_bss_8007A0D8 * 0x10, MEMPOOL_STAGE);
 
     word_CODE_bss_8007A0F0 = (s16) dword_CODE_bss_8007A0D0;
@@ -464,4 +477,3 @@ void sub_GAME_7F09C044(Vertex* arg0) {
         }
     }
 }
-
